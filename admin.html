@@ -97,10 +97,10 @@ tr:hover td { background: #1e1e3a; }
   <div class="container">
     <!-- TABS -->
     <div class="tabs">
-      <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
-      <button class="tab-btn" data-tab="importar">📥 Importar PDF</button>
-      <button class="tab-btn" data-tab="estudiantes">👥 Estudiantes</button>
-      <button class="tab-btn" data-tab="entregas">📝 Entregas</button>
+      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+      <button class="tab-btn" data-tab="importar" onclick="switchTab('importar')">📥 Importar PDF</button>
+      <button class="tab-btn" data-tab="estudiantes" onclick="switchTab('estudiantes')">👥 Estudiantes</button>
+      <button class="tab-btn" data-tab="entregas" onclick="switchTab('entregas')">📝 Entregas</button>
     </div>
 
     <!-- DASHBOARD -->
@@ -220,21 +220,22 @@ if (sessionStorage.getItem('admin_pparcial')) {
 // ═══════════════════════════════════════
 // TABS
 // ═══════════════════════════════════════
-function initTabs() {
-  document.querySelectorAll('.tab-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
-      btn.classList.add('active');
-      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-      
-      // Load content
-      if (btn.dataset.tab === 'dashboard') loadDashboard();
-      if (btn.dataset.tab === 'estudiantes') loadEstudiantes();
-      if (btn.dataset.tab === 'entregas') loadEntregas();
-    });
-  });
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+  
+  var btn = document.querySelector('[data-tab="' + tabName + '"]');
+  if (btn) btn.classList.add('active');
+  
+  var panel = document.getElementById('tab-' + tabName);
+  if (panel) panel.classList.add('active');
+  
+  if (tabName === 'dashboard') loadDashboard();
+  if (tabName === 'estudiantes') loadEstudiantes();
+  if (tabName === 'entregas') loadEntregas();
 }
+
+function initTabs() { /* No-op: tabs usan onclick directo */ }
 
 // ═══════════════════════════════════════
 // DASHBOARD
