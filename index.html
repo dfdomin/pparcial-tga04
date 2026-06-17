@@ -422,7 +422,7 @@ function loadQuestion(num) {
   document.getElementById('preguntaBadge').textContent = 'Pregunta ' + num + ' · ' + q.ce;
   document.getElementById('preguntaTitle').textContent = 'Q' + num + ': ' + q.title;
   document.getElementById('preguntaEnun').innerHTML = q.enun(examVars);
-  document.getElementById('codeBase').textContent = q.codeBase(examVars) + (state.codigoAcumulado || '');
+  document.getElementById('codeBase').textContent = q.codeBase(examVars);
   document.getElementById('codeEditor').value = '';
   document.getElementById('varsSugeridas').textContent = 'Variables: ' + q.vars;
   document.getElementById('tiempoPrudente').textContent = '⏱ Tiempo sugerido: ' + q.tiempo + ' min';
@@ -468,7 +468,7 @@ function renderProgressDots() {
 // ═══════════════════════════════════════
 async function runCode() {
   var q = questions[state.preguntaActual - 1];
-  var fullCode = q.codeBase(examVars) + (state.codigoAcumulado || '') + '\n' + document.getElementById('codeEditor').value;
+  var fullCode = q.codeBase(examVars) + '\n' + document.getElementById('codeEditor').value;
   var out = document.getElementById('outputPanel');
   out.innerHTML = '<span class="info">Ejecutando...</span>';
 
@@ -491,7 +491,7 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 // ═══════════════════════════════════════
 async function submitAnswer() {
   var q = questions[state.preguntaActual - 1];
-  var fullCode = q.codeBase(examVars) + (state.codigoAcumulado || '') + '\n' + document.getElementById('codeEditor').value;
+  var fullCode = q.codeBase(examVars) + '\n' + document.getElementById('codeEditor').value;
   var out = document.getElementById('outputPanel');
 
   try {
@@ -529,7 +529,6 @@ async function submitAnswer() {
     if (isCorrect || retries >= 2) {
       // Avanzar
       if (isCorrect) {
-        state.codigoAcumulado += '\n' + document.getElementById('codeEditor').value + '\n';
         out.innerHTML = '<span class="ok">✅ ¡Correcto! (' + (puntosBase*100) + '% del valor)</span>';
       } else {
         out.innerHTML = '<span class="err">❌ Sin más reintentos. Avanzando...</span>';
