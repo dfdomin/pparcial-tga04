@@ -621,7 +621,7 @@ async function submitAnswer() {
 // ═══════════════════════════════════════
 // FINISH
 // ═══════════════════════════════════════
-function finishExam() {
+async function finishExam() {
   clearInterval(state.timerInterval);
   document.getElementById('timeUpOverlay').classList.remove('active');
 
@@ -629,6 +629,9 @@ function finishExam() {
   var notaBase = 5.0 * (correctas / 9);
   var penalTotal = state.penalSalidas * 0.1 + state.extensionesUsadas * 0.5;
   var notaFinal = Math.max(0, Math.round((notaBase - penalTotal) * 10) / 10);
+
+  // Guardar en Supabase y esperar confirmación antes de mostrar resultados
+  await saveAttempt('finalizado', notaFinal);
 
   // Mostrar feedback
   var layout = document.getElementById('examLayout');
@@ -644,45 +647,50 @@ function finishExam() {
     '<p style="font-size:0.72rem;color:var(--muted);margin-top:16px">📊 Este parcial equivale al <strong>60%</strong> de tu nota del módulo.<br>📝 El <strong>40%</strong> restante corresponde a la nota formativa.<br>⚠ Máx. inasistencia: <strong>10.4 horas</strong> (20% de 52h).</p>' +
     '<p style="font-size:0.65rem;color:#555">' + state.nombre + ' · Documento: ' + state.documento + '</p>' +
     '</div></div>';
-
-  // Guardar final en Supabase
-  saveAttempt('finalizado', notaFinal);
 }
 
 // ═══════════════════════════════════════
 // SUPABASE PERSISTENCE
 // ═══════════════════════════════════════
 function saveAttempt(estado, notaFinal) {
-  try {
-    var client = getSupabase();
-    if (!client) { 
-      console.log('⚠ Supabase no disponible, guardando en localStorage'); 
-      saveLocal(estado, notaFinal); 
-      return; 
-    }
-
-    console.log('💾 Guardando intento en Supabase:', estado, state.documento);
-    client.from('pparcial_intentos').upsert({
-      documento: state.documento,
-      nombre: state.nombre,
-      estado: estado,
-      pregunta_actual: state.preguntaActual,
-      tiempo_restante: state.tiempoRestante,
-      extensiones_usadas: state.extensionesUsadas,
-      penal_salidas: state.penalSalidas,
-      nota_final: notaFinal || null,
-      finalizado_en: estado === 'finalizado' ? new Date().toISOString() : null
-    }, { onConflict: 'documento' }).then(function(r) {
-      if (r.error) {
-        console.log('❌ Supabase error:', r.error.message, r.error);
-      } else {
-        console.log('✅ Intento guardado en Supabase');
-        state.intentoId = r.data ? r.data[0].id : null;
+  return new Promise(function(resolve) {
+    try {
+      var client = getSupabase();
+      if (!client) { 
+        console.log('⚠ Supabase no disponible, guardando en localStorage'); 
+        saveLocal(estado, notaFinal); 
+        return resolve(); 
       }
-    }).catch(function(e) {
-      console.log('❌ Supabase exception:', e.message);
-    });
-  } catch(e) { console.log('saveAttempt error:', e.message); saveLocal(estado, notaFinal); }
+
+      console.log('💾 Guardando intento en Supabase:', estado, state.documento);
+      client.from('pparcial_intentos').upsert({
+        documento: state.documento,
+        nombre: state.nombre,
+        estado: estado,
+        pregunta_actual: state.preguntaActual,
+        tiempo_restante: state.tiempoRestante,
+        extensiones_usadas: state.extensionesUsadas,
+        penal_salidas: state.penalSalidas,
+        nota_final: notaFinal || null,
+        finalizado_en: estado === 'finalizado' ? new Date().toISOString() : null
+      }, { onConflict: 'documento' }).then(function(r) {
+        if (r.error) {
+          console.log('❌ Supabase error:', r.error.message, r.error);
+        } else {
+          console.log('✅ Intento guardado en Supabase');
+          state.intentoId = r.data ? r.data[0].id : null;
+        }
+        resolve();
+      }).catch(function(e) {
+        console.log('❌ Supabase exception:', e.message);
+        resolve();
+      });
+    } catch(e) { 
+      console.log('saveAttempt error:', e.message); 
+      saveLocal(estado, notaFinal); 
+      resolve(); 
+    }
+  });
 }
 
 function saveResponse(num, correcta, puntos, intentos) {
