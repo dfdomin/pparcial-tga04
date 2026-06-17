@@ -182,14 +182,14 @@ var state = {
 // ═══════════════════════════════════════
 // SUPABASE
 // ═══════════════════════════════════════
-var SUPABASE_URL = 'https://TU_PROYECTO.supabase.co';
-var SUPABASE_KEY = 'TU_SUPABASE_ANON_KEY';
+var SUPABASE_URL = 'https://btrsgwkwiucuoittshop.supabase.co';
+var SUPABASE_KEY = 'sb_publishable_WzhbHEiNzPt4LPB_UHvduA_SWqTR3FO';
 
 function getSupabase() {
-  if (typeof supabase !== 'undefined' && supabase && supabase.from) return supabase;
-  if (typeof window.supabaseCreateClient === 'function') {
-    supabase = window.supabaseCreateClient(SUPABASE_URL, SUPABASE_KEY);
-    return supabase;
+  if (typeof window.supabaseClient !== 'undefined' && window.supabaseClient) return window.supabaseClient;
+  if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    return window.supabaseClient;
   }
   return null;
 }

@@ -173,13 +173,15 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // ═══════════════════════════════════════
 // SUPABASE
 // ═══════════════════════════════════════
-var SUPABASE_URL = 'https://TU_PROYECTO.supabase.co';
-var SUPABASE_KEY = 'TU_SUPABASE_ANON_KEY';
+var SUPABASE_URL = 'https://btrsgwkwiucuoittshop.supabase.co';
+var SUPABASE_KEY = 'sb_publishable_WzhbHEiNzPt4LPB_UHvduA_SWqTR3FO';
 var supabase = null;
 
 function initSupabase() {
   if (supabase) return supabase;
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
   return supabase;
 }
 
