@@ -153,8 +153,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <span style="color:var(--muted)" id="penalInfo">Reintentos: <span id="retryCount">0</span>/6</span>
     <div class="actions">
       <button class="btn btn-success" id="btnRun" onclick="runCode()">▶ Ejecutar</button>
-      <button class="btn btn-primary" id="btnSubmit" onclick="submitAnswer()">✓ Enviar respuesta</button>
+      <button class="btn btn-primary" id="btnSubmit" onclick="submitAnswer()" disabled>✓ Enviar respuesta</button>
     </div>
+    <button class="btn" style="background:#555;color:#fff;font-size:0.72rem;padding:6px 12px" onclick="skipQuestion()">Saltar →</button>
   </div>
 </div>
 
@@ -189,7 +190,8 @@ var state = {
   penalSalidas: 0,
   penalReintentos: 0,
   retryCount: 0,
-  intentoId: null
+  intentoId: null,
+  codeExecuted: false  // Para evitar envíos accidentales
 };
 
 // ═══════════════════════════════════════
@@ -276,10 +278,10 @@ var questions = [
     enun: function(v) { return 'Usa <code>print()</code> para mostrar el mensaje <code>"Empresa: "</code> seguido del valor de la variable <code>empresa</code> (creada en la pregunta anterior).'; },
     vars: 'empresa (ya definida)',
     codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
-    outputMatch: function(v) { return 'Empresa: ' + v.empresa; },
+    outputMatch: function(v) { return v.empresa; },
     outputType: 'contains',
     ce: 'CE1, CE4', tiempo: 3,
-    hint: 'print("texto", variable) separa con coma.'
+    hint: 'print("cualquier texto", empresa) — no importa el mensaje, solo que muestre el valor de empresa.'
   },
   {
     num: 3, title: 'Distinguir número de texto',
@@ -470,7 +472,8 @@ function loadQuestion(num) {
   document.getElementById('tiempoPrudente').textContent = '⏱ Tiempo sugerido: ' + q.tiempo + ' min';
   document.getElementById('outputPanel').innerHTML = '<span class="info">▶ Haz clic en Ejecutar para probar tu código</span>';
   document.getElementById('retryCount').textContent = '0';
-  document.getElementById('btnSubmit').disabled = false;
+  document.getElementById('btnSubmit').disabled = true;
+  state.codeExecuted = false;
 
   // Actualizar panel de contexto con respuestas anteriores
   updateContextPanel();
@@ -491,6 +494,26 @@ function updateContextPanel() {
   }
   if (!has) html += '<em>Aún no hay respuestas correctas</em>';
   document.getElementById('panelContexto').innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// SALTAR PREGUNTA
+// ═══════════════════════════════════════
+function skipQuestion() {
+  if (!confirm('¿Saltar esta pregunta? Obtendrás 0 puntos y avanzarás a la siguiente.')) return;
+  
+  state.respuestas[state.preguntaActual - 1] = {
+    correcta: false,
+    codigo: '',
+    salida: '(pregunta saltada)',
+    intentos: 0
+  };
+  
+  if (state.preguntaActual >= 9) {
+    finishExam();
+  } else {
+    loadQuestion(state.preguntaActual + 1);
+  }
 }
 
 function renderProgressDots() {
@@ -520,9 +543,33 @@ async function runCode() {
     py.setStdout({ batched: function(s) { stdout.push(s); } });
     await py.runPythonAsync(fullCode);
     var txt = stdout.join('');
-    out.innerHTML = txt ? '<span class="ok">' + escapeHtml(txt.trim()) + '</span>' : '<span class="info">(sin salida)</span>';
+    
+    if (!txt.trim()) {
+      // Salida vacía — posible print= en vez de print()
+      var code = document.getElementById('codeEditor').value;
+      if (code.indexOf('print =') !== -1 || code.indexOf('print=') !== -1) {
+        out.innerHTML = '<span class="err">⚠ Parece que usaste <code>print =</code> en vez de <code>print(</code>. Corregilo y volvé a ejecutar.</span>';
+      } else {
+        out.innerHTML = '<span class="info">(sin salida — ¿escribiste print()?)</span>';
+      }
+    } else {
+      out.innerHTML = '<span class="ok">' + escapeHtml(txt.trim()) + '</span>';
+    }
+    
+    // Habilitar botón Enviar
+    state.codeExecuted = true;
+    document.getElementById('btnSubmit').disabled = false;
+    document.getElementById('btnSubmit').textContent = '✓ Enviar respuesta';
+    
   } catch(e) {
-    out.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>';
+    var msg = e.message;
+    if (msg.indexOf('SyntaxError') !== -1) {
+      out.innerHTML = '<span class="err">❌ Error de sintaxis. Revisá: ¿usaste <code>print =</code> en vez de <code>print(</code>? ¿Faltan paréntesis o comillas?</span>';
+    } else {
+      out.innerHTML = '<span class="err">' + escapeHtml(msg) + '</span>';
+    }
+    state.codeExecuted = true;
+    document.getElementById('btnSubmit').disabled = false;
   }
 }
 
