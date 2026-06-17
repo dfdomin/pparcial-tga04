@@ -511,7 +511,25 @@ async function submitAnswer() {
       var allFound = true;
       for (var i = 0; i < parts.length; i++) {
         var normPart = parts[i].replace(/\s+/g, ' ').trim();
-        if (normTxt.indexOf(normPart) === -1) { allFound = false; break; }
+        var found = normTxt.indexOf(normPart) !== -1;
+        
+        // Si no encuentra por string, intentar comparación numérica con tolerancia
+        if (!found) {
+          var numExpected = parseFloat(normPart);
+          if (!isNaN(numExpected) && normPart.length > 0) {
+            // Buscar todos los números en la salida y comparar con tolerancia 0.1%
+            var numMatches = normTxt.match(/-?\d+\.?\d*/g) || [];
+            for (var j = 0; j < numMatches.length; j++) {
+              var numActual = parseFloat(numMatches[j]);
+              if (!isNaN(numActual) && Math.abs(numActual - numExpected) / Math.max(Math.abs(numExpected), 1) < 0.001) {
+                found = true;
+                break;
+              }
+            }
+          }
+        }
+        
+        if (!found) { allFound = false; break; }
       }
       isCorrect = allFound && txt.length > 0;
     }
