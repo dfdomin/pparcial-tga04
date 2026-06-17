@@ -505,11 +505,13 @@ async function submitAnswer() {
     var isCorrect = false;
 
     if (q.outputType === 'contains') {
-      // Verificar que contenga las partes esperadas
+      // Normalizar espacios: colapsar múltiples espacios en uno
+      var normTxt = txt.replace(/\s+/g, ' ').trim();
       var parts = expected.split('\n').filter(function(p) { return p.trim(); });
       var allFound = true;
       for (var i = 0; i < parts.length; i++) {
-        if (txt.indexOf(parts[i].trim()) === -1) { allFound = false; break; }
+        var normPart = parts[i].replace(/\s+/g, ' ').trim();
+        if (normTxt.indexOf(normPart) === -1) { allFound = false; break; }
       }
       isCorrect = allFound && txt.length > 0;
     }
