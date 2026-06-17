@@ -96,6 +96,18 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <h1>📋 PParcial 2026-2</h1>
     <p class="subtitle">Fundamentos de Computación · IUB</p>
     <p style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">RA1: Variables y Operaciones básicas en Python</p>
+
+    <!-- REGLAS DEL MÓDULO Y PARCIAL -->
+    <div style="background:#1e1e3a;border-radius:10px;padding:10px 14px;margin-bottom:16px;text-align:left;font-size:0.68rem;color:var(--muted);line-height:1.5">
+      <strong style="color:var(--orange)">⚠ Reglas del módulo</strong><br>
+      ▪ La inasistencia máxima es de <strong style="color:var(--red)">10.4 horas</strong> (20% de 52h).<br>
+      ▪ Cada clase equivale a <strong>4 horas</strong>. Faltar 2 días = 8 horas acumuladas.<br>
+      ▪ Si superás las 10.4h, <strong style="color:var(--red)">perdés el módulo</strong>.<br>
+      <strong style="color:var(--accent);display:block;margin-top:6px">📊 Composición de la nota</strong>
+      ▪ <strong>Parcial:</strong> 60% &nbsp;|&nbsp; <strong>Formativa:</strong> 40%<br>
+      ▪ Este parcial equivale al <strong>60%</strong> de tu nota final del módulo.
+    </div>
+
     <div id="accessInfo" style="font-size:0.7rem;color:var(--muted);margin-bottom:12px"></div>
     <input type="text" id="docInput" placeholder="Número de documento" autocomplete="off">
     <div id="studentPreview" style="font-size:0.72rem;color:var(--blue);margin:4px 0;min-height:20px"></div>
@@ -612,7 +624,7 @@ function finishExam() {
     '<tr><td style="padding:6px">⏰ Tiempo extra:</td><td style="padding:6px;color:var(--red)">−' + (state.extensionesUsadas*0.5).toFixed(1) + '</td></tr>' +
     '<tr style="border-top:2px solid var(--accent)"><td style="padding:6px;font-weight:700;font-size:1rem">🎯 NOTA FINAL:</td><td style="padding:6px;font-weight:700;font-size:1.2rem;color:var(--accent)">' + notaFinal.toFixed(1) + ' / 5.0</td></tr>' +
     '</table>' +
-    '<p style="font-size:0.7rem;color:var(--muted);margin-top:16px">Este parcial equivale al 60% de tu nota del módulo.</p>' +
+    '<p style="font-size:0.72rem;color:var(--muted);margin-top:16px">📊 Este parcial equivale al <strong>60%</strong> de tu nota del módulo.<br>📝 El <strong>40%</strong> restante corresponde a la nota formativa.<br>⚠ Máx. inasistencia: <strong>10.4 horas</strong> (20% de 52h).</p>' +
     '<p style="font-size:0.65rem;color:#555">' + state.nombre + ' · Documento: ' + state.documento + '</p>' +
     '</div></div>';
 
