@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PParcial 2026-2 | IUB · Fundamentos de Computación</title>
+<style>
+:root {
+  --bg: #13111c; --panel: #1a1825; --editor-bg: #0f0d18; --accent: #7c3aed;
+  --green: #10b981; --red: #ef4444; --orange: #f59e0b; --blue: #06b6d4;
+  --text: #e2e8f0; --muted: #94a3b8; --border: #2d2d4a;
+  --radius: 12px; --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+/* ── Pantalla de acceso ── */
+.access-screen { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.access-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px 24px; max-width: 420px; width: 100%; margin: 16px; text-align: center; }
+.access-card h1 { font-size: 1.3rem; margin-bottom: 4px; color: var(--accent); }
+.access-card .subtitle { font-size: 0.78rem; color: var(--muted); margin-bottom: 20px; }
+.access-card input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.9rem; margin: 6px 0; text-align: center; }
+.access-card .btn { width: 100%; margin-top: 12px; }
+
+.btn { padding: 12px 20px; border: none; border-radius: 10px; font-weight: 700; font-size: 0.85rem; cursor: pointer; } 
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-success { background: var(--green); color: #000; }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-orange { background: var(--orange); color: #000; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Layout examen ── */
+.exam-layout { display: none; height: 100vh; grid-template-columns: 380px 1fr; grid-template-rows: 48px 1fr 40px; }
+.exam-layout.active { display: grid; }
+
+/* Top bar */
+.topbar { grid-column: 1/-1; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 0.75rem; }
+.topbar .timer { font-weight: 700; font-size: 1rem; }
+.topbar .timer.warning { color: var(--orange); }
+.topbar .timer.danger { color: var(--red); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* Left panel */
+.instr-panel { background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.instr-panel h3 { font-size: 0.9rem; }
+.instr-panel .pregunta-num { font-size: 0.7rem; color: var(--accent); font-weight: 700; }
+.instr-panel .context-box { background: #1e1e3a; border-radius: 8px; padding: 10px; font-size: 0.72rem; font-family: monospace; color: var(--muted); }
+.instr-panel .vars-sugeridas { font-size: 0.72rem; color: var(--blue); }
+.instr-panel .tiempo { font-size: 0.7rem; color: var(--muted); }
+.progress-dots { display: flex; gap: 4px; }
+.progress-dots .dot { width: 24px; height: 6px; border-radius: 3px; background: var(--border); }
+.progress-dots .dot.done { background: var(--green); }
+.progress-dots .dot.current { background: var(--accent); }
+
+/* Right panel */
+.editor-panel { display: flex; flex-direction: column; background: var(--editor-bg); }
+.editor-panel .code-base { padding: 10px 16px; font-family: monospace; font-size: 0.75rem; color: #555; background: #0a0812; border-bottom: 1px solid var(--border); white-space: pre-wrap; user-select: none; }
+.editor-panel textarea { flex: 1; background: transparent; color: #e2e8f0; border: none; padding: 16px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.85rem; resize: none; outline: none; line-height: 1.6; }
+.output-panel { padding: 10px 16px; background: #0a0812; border-top: 1px solid var(--border); font-family: monospace; font-size: 0.78rem; min-height: 60px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; }
+.output-panel .ok { color: var(--green); }
+.output-panel .err { color: var(--red); }
+.output-panel .info { color: var(--muted); }
+
+/* Bottom bar */
+.bottombar { grid-column: 1/-1; background: var(--panel); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 0.72rem; }
+.bottombar .actions { display: flex; gap: 8px; }
+
+/* Time up overlay */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; }
+.overlay.active { display: flex; }
+.overlay-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; max-width: 400px; text-align: center; }
+
+/* Feedback */
+.feedback { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; display: none; }
+.feedback.show { display: block; }
+.feedback.ok { background: #10b98122; border: 1px solid var(--green); color: var(--green); }
+.feedback.err { background: #ef444422; border: 1px solid var(--red); color: var(--red); }
+
+/* Mobile: single column */
+@media (max-width: 768px) {
+  .exam-layout { grid-template-columns: 1fr; grid-template-rows: 48px 200px 1fr 40px; }
+  .instr-panel { border-right: none; border-bottom: 1px solid var(--border); }
+}
+
+/* Bloqueo móvil */
+.mobile-block { display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 24px; }
+.mobile-block h2 { color: var(--red); margin-bottom: 8px; }
+.mobile-block p { color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<!-- PANTALLA DE ACCESO -->
+<div id="accessScreen" class="access-screen">
+  <div class="access-card">
+    <h1>📋 PParcial 2026-2</h1>
+    <p class="subtitle">Fundamentos de Computación · IUB</p>
+    <p style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">RA1: Variables y Operaciones básicas en Python</p>
+    <div id="accessInfo" style="font-size:0.7rem;color:var(--muted);margin-bottom:12px"></div>
+    <input type="text" id="docInput" placeholder="Número de documento" autocomplete="off">
+    <div id="studentPreview" style="font-size:0.72rem;color:var(--blue);margin:4px 0;min-height:20px"></div>
+    <button class="btn btn-primary" id="btnStart" disabled onclick="startExam()">▶ Iniciar Parcial</button>
+    <p style="font-size:0.62rem;color:#555;margin-top:12px">Tiempo: 50 min · 9 preguntas · Sin retroceso · Intento único</p>
+  </div>
+</div>
+
+<!-- MOBILE BLOCK -->
+<div id="mobileBlock" class="mobile-block" style="display:none">
+  <div>
+    <h2>⚠️ Dispositivo no compatible</h2>
+    <p>El parcial solo puede presentarse desde un computador (PC o portátil).<br>Si estás en un computador, maximiza la ventana del navegador.</p>
+  </div>
+</div>
+
+<!-- LAYOUT EXAMEN -->
+<div id="examLayout" class="exam-layout">
+  <div class="topbar">
+    <span id="topInfo">Pregunta <span id="qNum">1</span> de 9</span>
+    <span class="timer" id="timerDisplay">50:00</span>
+    <span id="studentName" style="font-size:0.7rem;color:var(--muted)"></span>
+  </div>
+
+  <div class="instr-panel" id="instrPanel">
+    <div class="progress-dots" id="progressDots"></div>
+    <span class="pregunta-num" id="preguntaBadge">Pregunta 1 · CE1, CE4</span>
+    <h3 id="preguntaTitle"></h3>
+    <p style="font-size:0.78rem;color:var(--muted)" id="preguntaEnun"></p>
+    <div class="context-box" id="contextBox"></div>
+    <div class="vars-sugeridas" id="varsSugeridas"></div>
+    <span class="tiempo" id="tiempoPrudente"></span>
+    <div id="panelContexto" style="font-size:0.68rem;color:var(--muted);margin-top:8px;padding:8px;background:#1e1e3a;border-radius:6px;"></div>
+  </div>
+
+  <div class="editor-panel">
+    <div class="code-base" id="codeBase"></div>
+    <textarea id="codeEditor" placeholder="# Escribe tu código aquí..." spellcheck="false"></textarea>
+    <div class="output-panel" id="outputPanel"><span class="info">▶ Haz clic en Ejecutar para probar tu código</span></div>
+  </div>
+
+  <div class="bottombar">
+    <span style="color:var(--muted)" id="penalInfo">Reintentos: <span id="retryCount">0</span>/2</span>
+    <div class="actions">
+      <button class="btn btn-success" id="btnRun" onclick="runCode()">▶ Ejecutar</button>
+      <button class="btn btn-primary" id="btnSubmit" onclick="submitAnswer()">✓ Enviar respuesta</button>
+    </div>
+  </div>
+</div>
+
+<!-- TIME UP OVERLAY -->
+<div id="timeUpOverlay" class="overlay">
+  <div class="overlay-card">
+    <h3 style="color:var(--red)">⏰ Tiempo agotado</h3>
+    <p style="color:var(--muted);font-size:0.8rem;margin:12px 0">¿Necesitas 5 minutos extra? Se restarán <strong>0.5 puntos</strong> de tu nota.</p>
+    <p style="font-size:0.7rem;color:var(--muted)">Extensiones usadas: <span id="extUsed">0</span>/3</p>
+    <button class="btn btn-orange" id="btnExtend" onclick="requestExtension()">+5 min (−0.5 pts)</button>
+    <button class="btn btn-danger" style="margin-top:8px" onclick="finishExam()">Finalizar parcial ahora</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+<script>
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+var state = {
+  documento: '',
+  nombre: '',
+  grupo: '',
+  horario: '',
+  preguntaActual: 1,
+  codigoAcumulado: '',
+  tiempoRestante: 50 * 60,
+  extensionesUsadas: 0,
+  timerInterval: null,
+  respuestas: [],
+  penalSalidas: 0,
+  penalReintentos: 0,
+  retryCount: 0,
+  intentoId: null
+};
+
+// ═══════════════════════════════════════
+// SUPABASE
+// ═══════════════════════════════════════
+var SUPABASE_URL = 'https://TU_PROYECTO.supabase.co';
+var SUPABASE_KEY = 'TU_SUPABASE_ANON_KEY';
+
+function getSupabase() {
+  if (typeof supabase !== 'undefined' && supabase && supabase.from) return supabase;
+  if (typeof window.supabaseCreateClient === 'function') {
+    supabase = window.supabaseCreateClient(SUPABASE_URL, SUPABASE_KEY);
+    return supabase;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════
+// PYODIDE
+// ═══════════════════════════════════════
+var pyodide = null, pyReady = false;
+async function initPy() {
+  if (pyReady) return pyodide;
+  if (typeof loadPyodide !== 'function') { await new Promise(r=>setTimeout(r,500)); }
+  pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/' });
+  pyReady = true;
+  return pyodide;
+}
+
+// ═══════════════════════════════════════
+// PREGUNTAS (valores aleatorios por estudiante)
+// ═══════════════════════════════════════
+var examVars = {}; // Se llena al iniciar
+
+function generateExamVars(doc) {
+  // Usar documento como semilla para variación determinística
+  var seed = 0;
+  for (var i = 0; i < doc.length; i++) seed = ((seed << 5) - seed) + doc.charCodeAt(i);
+  var rng = function(min, max) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return min + (seed % (max - min + 1));
+  };
+
+  return {
+    producto_a: 'Laptop Pro ' + rng(10,99),
+    producto_b: 'Monitor ' + rng(20,40) + '"',
+    producto_c: 'Teclado Mecánico',
+    precio_a: rng(80,150) * 10000,
+    precio_b: rng(30,70) * 10000,
+    precio_c: rng(15,35) * 10000,
+    ventas_ene: rng(45,95),
+    ventas_feb: rng(50,98),
+    ventas_mar: rng(40,90),
+    tasa_retencion: (rng(650,950)/10).toFixed(1),
+    meta_ventas: rng(55,85),
+    // Para Q1
+    empresa: ['TecnoLógica S.A.', 'InnovaGestión Ltda.', 'DataCorp Colombia', 'Soluciones Ágiles'][rng(0,3)],
+    sucursal: ['Norte', 'Centro', 'Sur', 'Oriente'][rng(0,3)]
+  };
+}
+
+var questions = [
+  {
+    num: 1, title: 'Crear variable y mostrar su valor',
+    enun: function(v) { return 'Crea una variable llamada <code>empresa</code> con el valor <code>"' + v.empresa + '"</code> y luego muéstrala en pantalla con <code>print()</code>.'; },
+    vars: 'empresa (str)',
+    codeBase: function(v) { return '# Contexto: indicadores de gestión organizacional\n# Usa variables para almacenar datos del negocio\n\n'; },
+    outputMatch: function(v) { return v.empresa; },
+    outputType: 'contains',
+    ce: 'CE1, CE4', tiempo: 3,
+    hint: 'Recuerda: las comillas indican texto. print(nombre_variable) muestra el valor.'
+  },
+  {
+    num: 2, title: 'Mostrar mensaje junto al valor de la variable',
+    enun: function(v) { return 'Usa <code>print()</code> para mostrar el mensaje <code>"Empresa: "</code> seguido del valor de la variable <code>empresa</code> (creada en la pregunta anterior).'; },
+    vars: 'empresa (ya definida)',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
+    outputMatch: function(v) { return 'Empresa: ' + v.empresa; },
+    outputType: 'contains',
+    ce: 'CE1, CE4', tiempo: 3,
+    hint: 'print("texto", variable) separa con coma.'
+  },
+  {
+    num: 3, title: 'Distinguir número de texto',
+    enun: function(v) { return 'Crea una variable <code>codigo</code> con el valor <code>' + v.precio_a + '</code> como <strong>número</strong> y otra variable <code>codigo_str</code> con el valor <code>"' + v.precio_a + '"</code> como <strong>texto</strong>. Usa <code>type()</code> dentro de <code>print()</code> para mostrar el tipo de cada una.'; },
+    vars: 'codigo (int), codigo_str (str)',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
+    outputMatch: function() { return "<class 'int'>"; },
+    outputType: 'contains',
+    ce: 'CE1', tiempo: 5,
+    hint: 'Sin comillas = número. Con comillas = texto. type(variable) devuelve el tipo.'
+  },
+  {
+    num: 4, title: 'Operación matemática: suma de ventas',
+    enun: function(v) { return 'Crea dos variables: <code>ventas_enero = ' + v.ventas_ene + '</code> y <code>ventas_febrero = ' + v.ventas_feb + '</code>. Calcula y muestra la <strong>suma total</strong> de los dos meses.'; },
+    vars: 'ventas_enero, ventas_febrero, total_bimestre',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
+    outputMatch: function(v) { return String(v.ventas_ene + v.ventas_feb); },
+    outputType: 'contains',
+    ce: 'CE2, CE4', tiempo: 4,
+    hint: 'total = ventas_enero + ventas_febrero ; print(total)'
+  },
+  {
+    num: 5, title: 'Suma de tres indicadores (estadística)',
+    enun: function(v) { return 'Ahora tienes las ventas de tres meses: <code>enero = ' + v.ventas_ene + '</code>, <code>febrero = ' + v.ventas_feb + '</code>, <code>marzo = ' + v.ventas_mar + '</code>. Calcula la <strong>suma total</strong> del trimestre y muéstrala.'; },
+    vars: 'enero, febrero, marzo, total_trimestre',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nfebrero = ' + v.ventas_feb + '\nmarzo = ' + v.ventas_mar + '\n\n'; },
+    outputMatch: function(v) { return String(v.ventas_ene + v.ventas_feb + v.ventas_mar); },
+    outputType: 'contains',
+    ce: 'CE2', tiempo: 3,
+    hint: 'total = enero + febrero + marzo'
+  },
+  {
+    num: 6, title: 'Promedio de indicadores (estadística)',
+    enun: function(v) { return 'Usando las mismas variables <code>enero</code>, <code>febrero</code> y <code>marzo</code> (ya definidas), calcula y muestra el <strong>promedio mensual</strong> de ventas del trimestre.'; },
+    vars: 'enero, febrero, marzo (ya definidas), promedio',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nfebrero = ' + v.ventas_feb + '\nmarzo = ' + v.ventas_mar + '\ntotal_trimestre = ' + (v.ventas_ene+v.ventas_feb+v.ventas_mar) + '\n\n'; },
+    outputMatch: function(v) { var avg = (v.ventas_ene + v.ventas_feb + v.ventas_mar) / 3; return String(Math.round(avg * 100) / 100); },
+    outputType: 'contains',
+    ce: 'CE2', tiempo: 4,
+    hint: 'promedio = total_trimestre / 3'
+  },
+  {
+    num: 7, title: 'Máximo y mínimo (estadística)',
+    enun: function(v) { return 'Usa las funciones <code>max()</code> y <code>min()</code> con las variables <code>enero</code>, <code>febrero</code>, <code>marzo</code> para encontrar el mes con <strong>mayor</strong> y <strong>menor</strong> venta. Muestra ambos resultados.'; },
+    vars: 'enero, febrero, marzo (ya definidas)',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nfebrero = ' + v.ventas_feb + '\nmarzo = ' + v.ventas_mar + '\n\n'; },
+    outputMatch: function(v) { 
+      var maxv = Math.max(v.ventas_ene, v.ventas_feb, v.ventas_mar);
+      var minv = Math.min(v.ventas_ene, v.ventas_feb, v.ventas_mar);
+      return String(maxv) + '\n' + String(minv);
+    },
+    outputType: 'contains',
+    ce: 'CE2', tiempo: 4,
+    hint: 'max(enero, febrero, marzo) sin corchetes. min() igual.'
+  },
+  {
+    num: 8, title: 'Variable lógica (booleana)',
+    enun: function(v) { return 'Crea una variable <code>meta_cumplida</code> con el valor <code>True</code> si las ventas de enero (' + v.ventas_ene + ') superan la meta (' + v.meta_ventas + '), o <code>False</code> si no. Usa <code>print()</code> para mostrar el valor de la variable.'; },
+    vars: 'meta_cumplida (bool)',
+    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nmeta = ' + v.meta_ventas + '\n\n'; },
+    outputMatch: function(v) { return v.ventas_ene > v.meta_ventas ? 'True' : 'False'; },
+    outputType: 'contains',
+    ce: 'CE1', tiempo: 4,
+    hint: 'Las variables lógicas solo pueden ser True o False. Son el tercer tipo de variable.'
+  },
+  {
+    num: 9, title: 'Pipeline completo: entrada → operación → salida',
+    enun: function(v) { return '<strong>Integrador final:</strong> Define tres variables con las ventas del segundo trimestre: <code>abril = ' + rng2(v,55,95) + '</code>, <code>mayo = ' + rng2(v,50,98) + '</code>, <code>junio = ' + rng2(v,40,90) + '</code>. Calcula el <strong>total</strong>, el <strong>promedio</strong> y muestra ambos con mensajes descriptivos. <em>Ejemplo de salida: "Total: 250 — Promedio: 83.33"</em>'; },
+    vars: 'abril, mayo, junio, total_q2, promedio_q2',
+    codeBase: function(v) { 
+      var abr = rng2(v,55,95), may = rng2(v,50,98), jun = rng2(v,40,90);
+      return 'empresa = "' + v.empresa + '"\n\n';
+    },
+    outputMatch: function(v) {
+      var abr = rng2(v,55,95), may = rng2(v,50,98), jun = rng2(v,40,90);
+      var tot = abr + may + jun;
+      var avg = tot / 3;
+      return 'Total' + '\n' + 'Promedio' + '\n' + String(Math.round(avg*100)/100);
+    },
+    outputType: 'contains',
+    ce: 'CE1, CE2, CE4', tiempo: 5,
+    hint: 'total = abril + mayo + junio ; promedio = total / 3 ; print("Total:", total)'
+  }
+];
+
+function rng2(v, min, max) {
+  var seed = v.ventas_ene + v.ventas_feb + v.ventas_mar;
+  seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+  return min + (seed % (max - min + 1));
+}
+
+// ═══════════════════════════════════════
+// TIMER
+// ═══════════════════════════════════════
+function startTimer() {
+  updateTimerDisplay();
+  state.timerInterval = setInterval(function() {
+    state.tiempoRestante--;
+    updateTimerDisplay();
+    if (state.tiempoRestante <= 0) {
+      clearInterval(state.timerInterval);
+      showTimeUp();
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  var m = Math.floor(state.tiempoRestante / 60);
+  var s = state.tiempoRestante % 60;
+  var el = document.getElementById('timerDisplay');
+  el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+  el.className = 'timer';
+  if (state.tiempoRestante < 300) el.className = 'timer danger';
+  else if (state.tiempoRestante < 600) el.className = 'timer warning';
+}
+
+function showTimeUp() {
+  document.getElementById('extUsed').textContent = state.extensionesUsadas;
+  document.getElementById('timeUpOverlay').classList.add('active');
+  document.getElementById('btnExtend').style.display = state.extensionesUsadas >= 3 ? 'none' : '';
+}
+
+function requestExtension() {
+  if (state.extensionesUsadas >= 3) return;
+  state.extensionesUsadas++;
+  state.tiempoRestante = 5 * 60;
+  state.penalReintentos += 0.5; // Penalización por tiempo extra
+  document.getElementById('timeUpOverlay').classList.remove('active');
+  document.getElementById('extUsed').textContent = state.extensionesUsadas;
+  startTimer();
+}
+
+// ═══════════════════════════════════════
+// EXAM FLOW
+// ═══════════════════════════════════════
+function startExam() {
+  var doc = document.getElementById('docInput').value.trim();
+  if (!doc) return;
+
+  state.documento = doc;
+  state.nombre = document.getElementById('studentPreview').textContent || 'Estudiante';
+  examVars = generateExamVars(doc);
+
+  document.getElementById('accessScreen').style.display = 'none';
+  document.getElementById('examLayout').classList.add('active');
+  document.getElementById('studentName').textContent = state.nombre;
+
+  renderProgressDots();
+  loadQuestion(1);
+  startTimer();
+
+  // Guardar intento en Supabase
+  saveAttempt('en_progreso');
+}
+
+function loadQuestion(num) {
+  state.preguntaActual = num;
+  state.retryCount = 0;
+  var q = questions[num - 1];
+
+  document.getElementById('qNum').textContent = num;
+  document.getElementById('preguntaBadge').textContent = 'Pregunta ' + num + ' · ' + q.ce;
+  document.getElementById('preguntaTitle').textContent = 'Q' + num + ': ' + q.title;
+  document.getElementById('preguntaEnun').innerHTML = q.enun(examVars);
+  document.getElementById('codeBase').textContent = q.codeBase(examVars) + (state.codigoAcumulado || '');
+  document.getElementById('codeEditor').value = '';
+  document.getElementById('varsSugeridas').textContent = 'Variables: ' + q.vars;
+  document.getElementById('tiempoPrudente').textContent = '⏱ Tiempo sugerido: ' + q.tiempo + ' min';
+  document.getElementById('outputPanel').innerHTML = '<span class="info">▶ Haz clic en Ejecutar para probar tu código</span>';
+  document.getElementById('retryCount').textContent = '0';
+  document.getElementById('btnSubmit').disabled = false;
+
+  // Actualizar panel de contexto con respuestas anteriores
+  updateContextPanel();
+  renderProgressDots();
+
+  // Scroll instrucciones al inicio
+  document.getElementById('instrPanel').scrollTop = 0;
+}
+
+function updateContextPanel() {
+  var html = '<strong>📋 Respuestas correctas:</strong><br>';
+  var has = false;
+  for (var i = 0; i < state.respuestas.length; i++) {
+    if (state.respuestas[i].correcta) {
+      has = true;
+      html += 'Q' + (i+1) + ': ✅ ' + escapeHtml(state.respuestas[i].salida).substring(0,40) + '<br>';
+    }
+  }
+  if (!has) html += '<em>Aún no hay respuestas correctas</em>';
+  document.getElementById('panelContexto').innerHTML = html;
+}
+
+function renderProgressDots() {
+  var html = '';
+  for (var i = 0; i < 9; i++) {
+    var cls = 'dot';
+    var resp = state.respuestas[i];
+    if (resp && resp.correcta) cls += ' done';
+    else if (i + 1 === state.preguntaActual) cls += ' current';
+    html += '<div class="' + cls + '"></div>';
+  }
+  document.getElementById('progressDots').innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// CODE EXECUTION
+// ═══════════════════════════════════════
+async function runCode() {
+  var q = questions[state.preguntaActual - 1];
+  var fullCode = q.codeBase(examVars) + (state.codigoAcumulado || '') + '\n' + document.getElementById('codeEditor').value;
+  var out = document.getElementById('outputPanel');
+  out.innerHTML = '<span class="info">Ejecutando...</span>';
+
+  try {
+    var py = await initPy();
+    var stdout = []; 
+    py.setStdout({ batched: function(s) { stdout.push(s); } });
+    await py.runPythonAsync(fullCode);
+    var txt = stdout.join('');
+    out.innerHTML = txt ? '<span class="ok">' + escapeHtml(txt.trim()) + '</span>' : '<span class="info">(sin salida)</span>';
+  } catch(e) {
+    out.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ═══════════════════════════════════════
+// SUBMIT
+// ═══════════════════════════════════════
+async function submitAnswer() {
+  var q = questions[state.preguntaActual - 1];
+  var fullCode = q.codeBase(examVars) + (state.codigoAcumulado || '') + '\n' + document.getElementById('codeEditor').value;
+  var out = document.getElementById('outputPanel');
+
+  try {
+    var py = await initPy();
+    var stdout = []; 
+    py.setStdout({ batched: function(s) { stdout.push(s); } });
+    await py.runPythonAsync(fullCode);
+    var txt = stdout.join('').trim();
+
+    var expected = q.outputMatch(examVars);
+    var isCorrect = false;
+
+    if (q.outputType === 'contains') {
+      // Verificar que contenga las partes esperadas
+      var parts = expected.split('\n').filter(function(p) { return p.trim(); });
+      var allFound = true;
+      for (var i = 0; i < parts.length; i++) {
+        if (txt.indexOf(parts[i].trim()) === -1) { allFound = false; break; }
+      }
+      isCorrect = allFound && txt.length > 0;
+    }
+
+    var retries = state.retryCount;
+    var puntosBase = isCorrect ? (retries === 0 ? 1 : retries === 1 ? 0.75 : 0.5) : 0;
+
+    state.respuestas[state.preguntaActual - 1] = {
+      correcta: isCorrect,
+      codigo: document.getElementById('codeEditor').value,
+      salida: txt,
+      intentos: retries + 1
+    };
+
+    if (isCorrect || retries >= 2) {
+      // Avanzar
+      if (isCorrect) {
+        state.codigoAcumulado += '\n' + document.getElementById('codeEditor').value + '\n';
+        out.innerHTML = '<span class="ok">✅ ¡Correcto! (' + (puntosBase*100) + '% del valor)</span>';
+      } else {
+        out.innerHTML = '<span class="err">❌ Sin más reintentos. Avanzando...</span>';
+      }
+
+      if (state.preguntaActual >= 9) {
+        setTimeout(finishExam, 1500);
+      } else {
+        setTimeout(function() { loadQuestion(state.preguntaActual + 1); }, 1500);
+      }
+    } else {
+      state.retryCount++;
+      document.getElementById('retryCount').textContent = state.retryCount;
+      var msg = retries === 0 ? 
+        '❌ La respuesta no coincide. Revisa y vuelve a intentar (2.º intento = 75% del valor)' :
+        '❌ Último intento (3.º = 50% del valor). Revisa bien.';
+      out.innerHTML = '<span class="err">' + msg + '</span>';
+    }
+
+    // Guardar en Supabase  
+    saveResponse(state.preguntaActual, isCorrect, puntosBase, retries + 1);
+
+  } catch(e) {
+    out.innerHTML = '<span class="err">Error: ' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+// ═══════════════════════════════════════
+// FINISH
+// ═══════════════════════════════════════
+function finishExam() {
+  clearInterval(state.timerInterval);
+  document.getElementById('timeUpOverlay').classList.remove('active');
+
+  var correctas = state.respuestas.filter(function(r) { return r && r.correcta; }).length;
+  var notaBase = 5.0 * (correctas / 9);
+  var penalTotal = state.penalSalidas * 0.2 + state.extensionesUsadas * 0.5;
+  var notaFinal = Math.max(0, Math.round((notaBase - penalTotal) * 10) / 10);
+
+  // Mostrar feedback
+  var layout = document.getElementById('examLayout');
+  layout.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px"><div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:500px;text-align:center">' +
+    '<h2 style="color:var(--accent);margin-bottom:16px">📋 Parcial Finalizado</h2>' +
+    '<table style="width:100%;font-size:0.8rem;text-align:left;border-collapse:collapse">' +
+    '<tr><td style="padding:6px">✅ Correctas:</td><td style="padding:6px;font-weight:700">' + correctas + '/9</td></tr>' +
+    '<tr><td style="padding:6px">📐 Nota base:</td><td style="padding:6px">' + notaBase.toFixed(1) + '</td></tr>' +
+    '<tr><td style="padding:6px">🚪 Salidas de pantalla:</td><td style="padding:6px;color:var(--red)">−' + (state.penalSalidas*0.2).toFixed(1) + '</td></tr>' +
+    '<tr><td style="padding:6px">⏰ Tiempo extra:</td><td style="padding:6px;color:var(--red)">−' + (state.extensionesUsadas*0.5).toFixed(1) + '</td></tr>' +
+    '<tr style="border-top:2px solid var(--accent)"><td style="padding:6px;font-weight:700;font-size:1rem">🎯 NOTA FINAL:</td><td style="padding:6px;font-weight:700;font-size:1.2rem;color:var(--accent)">' + notaFinal.toFixed(1) + ' / 5.0</td></tr>' +
+    '</table>' +
+    '<p style="font-size:0.7rem;color:var(--muted);margin-top:16px">Este parcial equivale al 60% de tu nota del módulo.</p>' +
+    '<p style="font-size:0.65rem;color:#555">' + state.nombre + ' · Documento: ' + state.documento + '</p>' +
+    '</div></div>';
+
+  // Guardar final en Supabase
+  saveAttempt('finalizado', notaFinal);
+}
+
+// ═══════════════════════════════════════
+// SUPABASE PERSISTENCE
+// ═══════════════════════════════════════
+function saveAttempt(estado, notaFinal) {
+  try {
+    var client = getSupabase();
+    if (!client) { console.log('Supabase no disponible, guardando en localStorage'); saveLocal(estado, notaFinal); return; }
+
+    client.from('pparcial_intentos').upsert({
+      documento: state.documento,
+      nombre: state.nombre,
+      estado: estado,
+      pregunta_actual: state.preguntaActual,
+      tiempo_restante: state.tiempoRestante,
+      extensiones_usadas: state.extensionesUsadas,
+      penal_salidas: state.penalSalidas,
+      nota_final: notaFinal || null
+    }, { onConflict: 'documento' }).then(function(r) {
+      if (r.error) console.log('Supabase error:', r.error.message);
+      else state.intentoId = r.data ? r.data[0].id : null;
+    });
+  } catch(e) { console.log('saveAttempt error:', e.message); saveLocal(estado, notaFinal); }
+}
+
+function saveResponse(num, correcta, puntos, intentos) {
+  try {
+    var client = getSupabase();
+    if (!client) return;
+    client.from('pparcial_respuestas').insert({
+      documento: state.documento,
+      pregunta_num: num,
+      correcta: correcta,
+      puntos: puntos,
+      intentos: intentos,
+      codigo: state.respuestas[num-1] ? state.respuestas[num-1].codigo : ''
+    }).then(function(r) {
+      if (r.error) console.log('saveResponse error:', r.error.message);
+    });
+  } catch(e) { console.log('saveResponse error:', e.message); }
+}
+
+function saveLocal(estado, notaFinal) {
+  var data = {
+    documento: state.documento,
+    nombre: state.nombre,
+    estado: estado,
+    respuestas: state.respuestas,
+    nota: notaFinal,
+    ts: new Date().toISOString()
+  };
+  var key = 'pparcial_' + state.documento;
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+// ═══════════════════════════════════════
+// INTEGRITY
+// ═══════════════════════════════════════
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden && state.preguntaActual > 0) {
+    state.penalSalidas++;
+    console.log('⚠ Salida de pantalla #' + state.penalSalidas + ' (−0.2 pts c/u)');
+  }
+});
+
+// ═══════════════════════════════════════
+// MOBILE DETECTION
+// ═══════════════════════════════════════
+function checkMobile() {
+  var isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent) || window.innerWidth < 768;
+  if (isMobile) {
+    document.getElementById('accessScreen').style.display = 'none';
+    document.getElementById('mobileBlock').style.display = 'flex';
+  }
+}
+
+// ═══════════════════════════════════════
+// DOCUMENT INPUT AUTOCOMPLETE
+// ═══════════════════════════════════════
+document.getElementById('docInput').addEventListener('input', function() {
+  var doc = this.value.trim();
+  if (doc.length >= 5) {
+    var client = getSupabase();
+    if (client) {
+      client.from('pparcial_estudiantes').select('*').eq('documento', doc).maybeSingle().then(function(r) {
+        if (r.data) {
+          state.nombre = r.data.nombre;
+          state.grupo = r.data.grupo;
+          state.horario = r.data.horario;
+          document.getElementById('studentPreview').textContent = r.data.nombre + ' · ' + r.data.grupo;
+          document.getElementById('btnStart').disabled = false;
+        } else {
+          document.getElementById('studentPreview').textContent = 'Documento no encontrado';
+          document.getElementById('btnStart').disabled = true;
+        }
+      });
+    } else {
+      // Sin Supabase: permitir con cualquier documento >=5 chars
+      document.getElementById('studentPreview').textContent = 'Estudiante (modo local)';
+      document.getElementById('btnStart').disabled = false;
+    }
+  }
+});
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+checkMobile();
+</script>
+</body>
+</html>
