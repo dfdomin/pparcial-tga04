@@ -181,18 +181,24 @@ var state = {
 };
 
 // ═══════════════════════════════════════
-// SUPABASE
+// SUPABASE INIT (al cargar la página)
 // ═══════════════════════════════════════
 var SUPABASE_URL = 'https://btrsgwkwiucuoittshop.supabase.co';
 var SUPABASE_KEY = 'sb_publishable_WzhbHEiNzPt4LPB_UHvduA_SWqTR3FO';
+var supabaseClient = null;
+
+(function initSupabaseClient() {
+  if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    console.log('✅ Supabase inicializado');
+  } else {
+    console.log('⚠ window.supabase no disponible — reintentando en 500ms');
+    setTimeout(initSupabaseClient, 500);
+  }
+})();
 
 function getSupabase() {
-  if (typeof window.supabaseClient !== 'undefined' && window.supabaseClient) return window.supabaseClient;
-  if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
-    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    return window.supabaseClient;
-  }
-  return null;
+  return supabaseClient;
 }
 
 // ═══════════════════════════════════════
@@ -612,8 +618,13 @@ function finishExam() {
 function saveAttempt(estado, notaFinal) {
   try {
     var client = getSupabase();
-    if (!client) { console.log('Supabase no disponible, guardando en localStorage'); saveLocal(estado, notaFinal); return; }
+    if (!client) { 
+      console.log('⚠ Supabase no disponible, guardando en localStorage'); 
+      saveLocal(estado, notaFinal); 
+      return; 
+    }
 
+    console.log('💾 Guardando intento en Supabase:', estado, state.documento);
     client.from('pparcial_intentos').upsert({
       documento: state.documento,
       nombre: state.nombre,
@@ -622,10 +633,17 @@ function saveAttempt(estado, notaFinal) {
       tiempo_restante: state.tiempoRestante,
       extensiones_usadas: state.extensionesUsadas,
       penal_salidas: state.penalSalidas,
-      nota_final: notaFinal || null
+      nota_final: notaFinal || null,
+      finalizado_en: estado === 'finalizado' ? new Date().toISOString() : null
     }, { onConflict: 'documento' }).then(function(r) {
-      if (r.error) console.log('Supabase error:', r.error.message);
-      else state.intentoId = r.data ? r.data[0].id : null;
+      if (r.error) {
+        console.log('❌ Supabase error:', r.error.message, r.error);
+      } else {
+        console.log('✅ Intento guardado en Supabase');
+        state.intentoId = r.data ? r.data[0].id : null;
+      }
+    }).catch(function(e) {
+      console.log('❌ Supabase exception:', e.message);
     });
   } catch(e) { console.log('saveAttempt error:', e.message); saveLocal(estado, notaFinal); }
 }
