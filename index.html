@@ -253,7 +253,10 @@ function generateExamVars(doc) {
     meta_ventas: rng(55,85),
     // Para Q1
     empresa: ['TecnoLógica S.A.', 'InnovaGestión Ltda.', 'DataCorp Colombia', 'Soluciones Ágiles'][rng(0,3)],
-    sucursal: ['Norte', 'Centro', 'Sur', 'Oriente'][rng(0,3)]
+    sucursal: ['Norte', 'Centro', 'Sur', 'Oriente'][rng(0,3)],
+    // Para Q8 — algoritmo del vuelto (pago siempre > compra)
+    total_compra: (function() { var c = rng(3,15); examVars._compra_idx = c; return c * 5000; })(),
+    pago_con: (function() { var c = (examVars._compra_idx || 5); return (c + rng(1, 19-c)) * 5000; })()
   };
 }
 
@@ -333,14 +336,26 @@ var questions = [
     hint: 'max(enero, febrero, marzo) sin corchetes. min() igual.'
   },
   {
-    num: 8, title: 'Variable lógica (booleana)',
-    enun: function(v) { return 'Crea una variable <code>meta_cumplida</code> con el valor <code>True</code> si las ventas de enero (' + v.ventas_ene + ') superan la meta (' + v.meta_ventas + '), o <code>False</code> si no. Usa <code>print()</code> para mostrar el valor de la variable.'; },
-    vars: 'meta_cumplida (bool)',
-    codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nmeta = ' + v.meta_ventas + '\n\n'; },
-    outputMatch: function(v) { return v.ventas_ene > v.meta_ventas ? 'True' : 'False'; },
+    num: 8, title: 'Algoritmo cotidiano — Calcular vuelto',
+    enun: function(v) { 
+      var compra = v.total_compra || 45000;
+      var pago = v.pago_con || 100000;
+      return '<strong>Un algoritmo es una secuencia de pasos para resolver un problema.</strong> Ejemplo cotidiano: calcular el vuelto de una compra.<br><br>' +
+        '📥 <strong>Entrada:</strong> <code>total_compra = ' + compra + '</code> y <code>pago_con = ' + pago + '</code><br>' +
+        '⚙️ <strong>Operación:</strong> restar (<code>pago_con - total_compra</code>)<br>' +
+        '📤 <strong>Salida:</strong> mostrar el vuelto con <code>print()</code><br><br>' +
+        '<em>Escribí el algoritmo completo: definí las variables, calculá el vuelto y mostralo.</em>';
+    },
+    vars: 'total_compra, pago_con, vuelto',
+    codeBase: function(v) { return '# Algoritmo: calcular vuelto\n# Entrada → Operación → Salida\n\n'; },
+    outputMatch: function(v) { 
+      var compra = v.total_compra || 45000;
+      var pago = v.pago_con || 100000;
+      return String(pago - compra);
+    },
     outputType: 'contains',
-    ce: 'CE1', tiempo: 4,
-    hint: 'Las variables lógicas solo pueden ser True o False. Son el tercer tipo de variable.'
+    ce: 'CE1, CE4', tiempo: 5,
+    hint: 'vuelto = pago_con - total_compra ; print(vuelto)  — Así se escribe un algoritmo: entrada → operación → salida.'
   },
   {
     num: 9, title: 'Pipeline completo: entrada → operación → salida',
