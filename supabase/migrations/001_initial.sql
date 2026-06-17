@@ -1,5 +1,11 @@
 -- PParcial 2026-2: Tablas para Fundamentos de Computación
--- Ejecutar en Supabase SQL Editor
+-- Ejecutar en Supabase SQL Editor (reemplaza migración anterior)
+
+-- Primero eliminar políticas viejas si existen
+DROP POLICY IF EXISTS "Acceso público estudiantes" ON pparcial_estudiantes;
+DROP POLICY IF EXISTS "Acceso público intentos" ON pparcial_intentos;
+DROP POLICY IF EXISTS "Acceso público respuestas" ON pparcial_respuestas;
+DROP POLICY IF EXISTS "Acceso público eventos" ON pparcial_eventos;
 
 -- Estudiantes importados desde PDF Academusoft
 CREATE TABLE IF NOT EXISTS pparcial_estudiantes (
@@ -15,9 +21,9 @@ CREATE TABLE IF NOT EXISTS pparcial_estudiantes (
 -- Intentos del parcial
 CREATE TABLE IF NOT EXISTS pparcial_intentos (
   id SERIAL PRIMARY KEY,
-  documento TEXT REFERENCES pparcial_estudiantes(documento),
+  documento TEXT UNIQUE NOT NULL,
   nombre TEXT,
-  estado TEXT DEFAULT 'en_progreso', -- en_progreso | finalizado
+  estado TEXT DEFAULT 'en_progreso',
   pregunta_actual INT DEFAULT 1,
   tiempo_restante INT DEFAULT 3000,
   extensiones_usadas INT DEFAULT 0,
@@ -30,7 +36,7 @@ CREATE TABLE IF NOT EXISTS pparcial_intentos (
 -- Respuestas por pregunta
 CREATE TABLE IF NOT EXISTS pparcial_respuestas (
   id SERIAL PRIMARY KEY,
-  documento TEXT REFERENCES pparcial_estudiantes(documento),
+  documento TEXT NOT NULL,
   pregunta_num INT,
   correcta BOOLEAN DEFAULT false,
   puntos REAL DEFAULT 0,
@@ -42,8 +48,8 @@ CREATE TABLE IF NOT EXISTS pparcial_respuestas (
 -- Eventos de integridad
 CREATE TABLE IF NOT EXISTS pparcial_eventos (
   id SERIAL PRIMARY KEY,
-  documento TEXT REFERENCES pparcial_estudiantes(documento),
-  tipo TEXT, -- salida_pantalla, copiar, pegar
+  documento TEXT NOT NULL,
+  tipo TEXT,
   ocurrido_en TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -53,11 +59,21 @@ ALTER TABLE pparcial_intentos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pparcial_respuestas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pparcial_eventos ENABLE ROW LEVEL SECURITY;
 
--- Políticas públicas (la app usa la anon key)
-CREATE POLICY "Acceso público estudiantes" ON pparcial_estudiantes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acceso público intentos" ON pparcial_intentos FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acceso público respuestas" ON pparcial_respuestas FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acceso público eventos" ON pparcial_eventos FOR ALL USING (true) WITH CHECK (true);
+-- Políticas por operación (FOR ALL no es válido en PostgreSQL)
+CREATE POLICY "select_estudiantes" ON pparcial_estudiantes FOR SELECT USING (true);
+CREATE POLICY "insert_estudiantes" ON pparcial_estudiantes FOR INSERT WITH CHECK (true);
+CREATE POLICY "update_estudiantes" ON pparcial_estudiantes FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "select_intentos" ON pparcial_intentos FOR SELECT USING (true);
+CREATE POLICY "insert_intentos" ON pparcial_intentos FOR INSERT WITH CHECK (true);
+CREATE POLICY "update_intentos" ON pparcial_intentos FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "select_respuestas" ON pparcial_respuestas FOR SELECT USING (true);
+CREATE POLICY "insert_respuestas" ON pparcial_respuestas FOR INSERT WITH CHECK (true);
+CREATE POLICY "update_respuestas" ON pparcial_respuestas FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "select_eventos" ON pparcial_eventos FOR SELECT USING (true);
+CREATE POLICY "insert_eventos" ON pparcial_eventos FOR INSERT WITH CHECK (true);
 
 -- Insertar estudiantes de prueba
 INSERT INTO pparcial_estudiantes (documento, nombre, grupo, horario) VALUES
