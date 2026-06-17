@@ -506,11 +506,11 @@ async function submitAnswer() {
 
     if (q.outputType === 'contains') {
       // Normalizar espacios: colapsar múltiples espacios en uno
-      var normTxt = txt.replace(/\s+/g, ' ').trim();
+      var normTxt = txt.replace(/\s+/g, ' ').trim().toLowerCase();
       var parts = expected.split('\n').filter(function(p) { return p.trim(); });
       var allFound = true;
       for (var i = 0; i < parts.length; i++) {
-        var normPart = parts[i].replace(/\s+/g, ' ').trim();
+        var normPart = parts[i].replace(/\s+/g, ' ').trim().toLowerCase();
         var found = normTxt.indexOf(normPart) !== -1;
         
         // Si no encuentra por string, intentar comparación numérica con tolerancia
