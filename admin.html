@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — PParcial 2026-2 | IUB</title>
+<style>
+:root {
+  --bg: #0f0f1a; --card: #1a1a2e; --accent: #7c3aed; --green: #10b981; --red: #ef4444;
+  --text: #e2e8f0; --muted: #94a3b8; --border: #2d2d4a; --radius: 12px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+header { background: linear-gradient(135deg, #7c3aed, #4c1d95); padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; }
+header h1 { font-size: 1.1rem; }
+header .badge { font-size: 0.65rem; background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; }
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+/* Login */
+.login-screen { display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 16px; }
+.login-screen h2 { color: var(--accent); }
+.login-screen input { padding: 10px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.9rem; width: 280px; text-align: center; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 16px; border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 8px; cursor: pointer; font-size: 0.78rem; }
+.tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.card h3 { font-size: 0.95rem; margin-bottom: 12px; }
+.card h3.green { color: var(--green); }
+.card h3.purple { color: var(--accent); }
+
+.btn { padding: 10px 20px; border: none; border-radius: 10px; font-weight: 700; font-size: 0.82rem; cursor: pointer; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-green { background: var(--green); color: #000; }
+.btn-sm { padding: 6px 12px; font-size: 0.72rem; }
+
+/* Stats grid */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+.stat-card .stat-num { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+.stat-card .stat-label { font-size: 0.68rem; color: var(--muted); }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border); color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: #1e1e3a; }
+.nota { font-weight: 700; }
+.nota.alta { color: var(--green); }
+.nota.media { color: var(--orange); }
+.nota.baja { color: var(--red); }
+
+/* PDF Drop */
+.drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+.drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); }
+.drop-zone p { font-size: 0.8rem; color: var(--muted); }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 10px; font-weight: 600; z-index: 999; animation: fadeInOut 3s ease; }
+.toast.success { background: var(--green); color: #000; }
+.toast.error { background: var(--red); color: #fff; }
+@keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(20px)} 10%{opacity:1;transform:translateX(-50%) translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+
+/* Logout */
+.logout-btn { font-size: 0.7rem; color: rgba(255,255,255,0.7); cursor: pointer; background: none; border: 1px solid rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 6px; }
+.logout-btn:hover { color: #fff; border-color: #fff; }
+
+@media (max-width: 600px) { .container { padding: 12px; } th, td { padding: 5px 6px; font-size: 0.68rem; } }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-screen">
+  <h2>🔐 Admin — PParcial 2026-2</h2>
+  <p style="color:var(--muted);font-size:0.8rem">Panel de administración docente</p>
+  <input type="password" id="passInput" placeholder="Contraseña de acceso" autocomplete="off">
+  <button class="btn btn-primary" onclick="login()">Ingresar</button>
+  <p id="loginMsg" style="font-size:0.72rem;color:var(--red);min-height:20px"></p>
+</div>
+
+<!-- ADMIN (hidden until login) -->
+<div id="adminPanel" style="display:none">
+  <header>
+    <div>
+      <h1>📋 Admin — PParcial 2026-2</h1>
+      <span class="badge">Fundamentos de Computación · IUB</span>
+    </div>
+    <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+  </header>
+
+  <div class="container">
+    <!-- TABS -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="tab-btn" data-tab="importar">📥 Importar PDF</button>
+      <button class="tab-btn" data-tab="estudiantes">👥 Estudiantes</button>
+      <button class="tab-btn" data-tab="entregas">📝 Entregas</button>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="tab-dashboard" class="tab-content active">
+      <div class="stats" id="statsGrid"></div>
+      <div class="card">
+        <h3 class="purple">📋 Últimas entregas</h3>
+        <div style="overflow-x:auto" id="recentTable"></div>
+      </div>
+    </div>
+
+    <!-- IMPORTAR PDF -->
+    <div id="tab-importar" class="tab-content">
+      <div class="card">
+        <h3 class="green">📥 Importar estudiantes desde PDF Academusoft</h3>
+        <p style="font-size:0.78rem;color:var(--muted);margin-bottom:16px">
+          Arrastra uno o varios PDF exportados del sistema Academusoft. El sistema extraerá automáticamente documento, nombre, grupo y horario.
+        </p>
+        <div class="drop-zone" id="dropZone">
+          <p>📄 Arrastra aquí los archivos PDF</p>
+          <p style="font-size:0.65rem;color:#555">o haz clic para seleccionar</p>
+          <input type="file" id="pdfInput" accept=".pdf" multiple style="display:none" onchange="handlePdfUpload(this.files)">
+        </div>
+        <div id="importStatus" style="margin-top:12px;font-size:0.72rem"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="purple">✏️ Agregar estudiante manual</h3>
+        <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:8px;align-items:end">
+          <div><label style="font-size:0.7rem;color:var(--muted)">Documento</label><input id="manDoc" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem"></div>
+          <div><label style="font-size:0.7rem;color:var(--muted)">Nombre completo</label><input id="manNombre" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem"></div>
+          <div><label style="font-size:0.7rem;color:var(--muted)">Grupo</label><input id="manGrupo" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem" placeholder="7_GA_G1"></div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="addManual()">+ Agregar</button>
+        <div id="manualStatus" style="margin-top:8px;font-size:0.72rem"></div>
+      </div>
+    </div>
+
+    <!-- ESTUDIANTES -->
+    <div id="tab-estudiantes" class="tab-content">
+      <div class="card">
+        <h3 class="purple">👥 Listado de estudiantes</h3>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <input id="searchDoc" placeholder="Buscar por documento..." style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem;flex:1;min-width:200px">
+          <select id="filterGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem" onchange="loadEstudiantes()">
+            <option value="">Todos los grupos</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadEstudiantes()">🔍 Buscar</button>
+          <button class="btn btn-green btn-sm" onclick="exportExcel()">📥 Exportar Excel</button>
+        </div>
+        <div style="overflow-x:auto" id="studentsTable"></div>
+      </div>
+    </div>
+
+    <!-- ENTREGAS -->
+    <div id="tab-entregas" class="tab-content">
+      <div class="card">
+        <h3 class="green">📝 Entregas del parcial</h3>
+        <div style="overflow-x:auto" id="entregasTable"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ═══════════════════════════════════════
+// SUPABASE
+// ═══════════════════════════════════════
+var SUPABASE_URL = 'https://TU_PROYECTO.supabase.co';
+var SUPABASE_KEY = 'TU_SUPABASE_ANON_KEY';
+var supabase = null;
+
+function initSupabase() {
+  if (supabase) return supabase;
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  return supabase;
+}
+
+// ═══════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════
+var ADMIN_PASS = 'sasadfgh2019';
+
+function login() {
+  var pass = document.getElementById('passInput').value;
+  if (pass === ADMIN_PASS) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('adminPanel').style.display = 'block';
+    sessionStorage.setItem('admin_pparcial', '1');
+    initSupabase();
+    loadDashboard();
+    initTabs();
+  } else {
+    document.getElementById('loginMsg').textContent = 'Contraseña incorrecta';
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem('admin_pparcial');
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('adminPanel').style.display = 'none';
+}
+
+// Auto-login if session
+if (sessionStorage.getItem('admin_pparcial')) {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('adminPanel').style.display = 'block';
+  initSupabase();
+  loadDashboard();
+  initTabs();
+}
+
+// ═══════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════
+function initTabs() {
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      
+      // Load content
+      if (btn.dataset.tab === 'dashboard') loadDashboard();
+      if (btn.dataset.tab === 'estudiantes') loadEstudiantes();
+      if (btn.dataset.tab === 'entregas') loadEntregas();
+    });
+  });
+}
+
+// ═══════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════
+async function loadDashboard() {
+  var client = initSupabase();
+  
+  // Stats
+  var p1 = client.from('pparcial_estudiantes').select('*', { count: 'exact', head: true });
+  var p2 = client.from('pparcial_intentos').select('*', { count: 'exact', head: true }).eq('estado', 'finalizado');
+  var p3 = client.from('pparcial_intentos').select('*', { count: 'exact', head: true }).eq('estado', 'en_progreso');
+  var p4 = client.from('pparcial_intentos').select('nota_final').not('nota_final', 'is', null);
+  
+  var results = await Promise.all([p1, p2, p3, p4]);
+  var totalEst = results[0].count || 0;
+  var finalizados = results[1].count || 0;
+  var enProgreso = results[2].count || 0;
+  
+  var notas = results[3].data || [];
+  var promedio = 0;
+  if (notas.length > 0) {
+    promedio = notas.reduce(function(s, n) { return s + (n.nota_final || 0); }, 0) / notas.length;
+  }
+
+  document.getElementById('statsGrid').innerHTML = 
+    '<div class="stat-card"><div class="stat-num">' + totalEst + '</div><div class="stat-label">Estudiantes registrados</div></div>' +
+    '<div class="stat-card"><div class="stat-num">' + finalizados + '</div><div class="stat-label">Parciales finalizados</div></div>' +
+    '<div class="stat-card"><div class="stat-num">' + enProgreso + '</div><div class="stat-label">En progreso</div></div>' +
+    '<div class="stat-card"><div class="stat-num">' + promedio.toFixed(1) + '</div><div class="stat-label">Nota promedio</div></div>';
+
+  // Recent entregas
+  var recent = await client.from('pparcial_intentos').select('*').order('finalizado_en', { ascending: false }).limit(10);
+  var rows = '';
+  (recent.data || []).forEach(function(r) {
+    var cls = (r.nota_final || 0) >= 4 ? 'alta' : (r.nota_final || 0) >= 3 ? 'media' : 'baja';
+    rows += '<tr><td>' + (r.documento || '') + '</td><td>' + (r.nombre || '') + '</td><td>' + (r.estado || '') + '</td><td class="nota ' + cls + '">' + (r.nota_final != null ? r.nota_final.toFixed(1) : '—') + '</td></tr>';
+  });
+  document.getElementById('recentTable').innerHTML = 
+    '<table><tr><th>Documento</th><th>Nombre</th><th>Estado</th><th>Nota</th></tr>' + (rows || '<tr><td colspan="4">Aún no hay entregas</td></tr>') + '</table>';
+}
+
+// ═══════════════════════════════════════
+// PDF IMPORT
+// ═══════════════════════════════════════
+document.getElementById('dropZone').addEventListener('click', function() {
+  document.getElementById('pdfInput').click();
+});
+document.getElementById('dropZone').addEventListener('dragover', function(e) {
+  e.preventDefault(); this.classList.add('dragover');
+});
+document.getElementById('dropZone').addEventListener('dragleave', function() {
+  this.classList.remove('dragover');
+});
+document.getElementById('dropZone').addEventListener('drop', function(e) {
+  e.preventDefault(); this.classList.remove('dragover');
+  handlePdfUpload(e.dataTransfer.files);
+});
+
+async function handlePdfUpload(files) {
+  var status = document.getElementById('importStatus');
+  if (!files || files.length === 0) return;
+  
+  var client = initSupabase();
+  var totalImported = 0;
+  
+  for (var f = 0; f < files.length; f++) {
+    var file = files[f];
+    status.innerHTML = 'Procesando ' + file.name + '...';
+    
+    try {
+      var arrayBuffer = await file.arrayBuffer();
+      var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      var students = [];
+      
+      for (var p = 1; p <= pdf.numPages; p++) {
+        var page = await pdf.getPage(p);
+        var textContent = await page.getTextContent();
+        var text = textContent.items.map(function(item) { return item.str; }).join(' ');
+        students = students.concat(parseAcademusoft(text));
+      }
+      
+      // Upsert students
+      for (var i = 0; i < students.length; i++) {
+        var s = students[i];
+        var result = await client.from('pparcial_estudiantes').upsert({
+          documento: s.documento,
+          nombre: s.nombre,
+          grupo: s.grupo || '',
+          horario: s.horario || '',
+          periodo: '2026-2'
+        }, { onConflict: 'documento' });
+        if (!result.error) totalImported++;
+      }
+      
+    } catch(e) {
+      status.innerHTML = '❌ Error procesando ' + file.name + ': ' + e.message;
+      return;
+    }
+  }
+  
+  status.innerHTML = '✅ Importados ' + totalImported + ' estudiantes de ' + files.length + ' archivo(s).';
+  showToast('Importación completada: ' + totalImported + ' estudiantes');
+  loadDashboard();
+  loadEstudiantes();
+}
+
+function parseAcademusoft(text) {
+  // Parser genérico de PDF Academusoft
+  // Busca patrones: documento, nombre, grupo, horario
+  var students = [];
+  var lines = text.split('\n').filter(function(l) { return l.trim(); });
+  
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    // Buscar números de documento (5-12 dígitos)
+    var docMatch = line.match(/\b(\d{7,12})\b/);
+    if (!docMatch) continue;
+    
+    var doc = docMatch[1];
+    // Buscar nombre cercano (palabras con mayúscula)
+    var nameMatch = line.match(/[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?/);
+    var nombre = nameMatch ? nameMatch[0] : 'Estudiante ' + doc;
+    
+    // Buscar grupo
+    var grupoMatch = line.match(/(\d+_[A-Z]+_G\d+)/);
+    var grupo = grupoMatch ? grupoMatch[1] : '';
+    
+    // Evitar duplicados
+    if (!students.find(function(s) { return s.documento === doc; })) {
+      students.push({ documento: doc, nombre: nombre, grupo: grupo, horario: '' });
+    }
+  }
+  
+  return students;
+}
+
+// ═══════════════════════════════════════
+// MANUAL ADD
+// ═══════════════════════════════════════
+async function addManual() {
+  var doc = document.getElementById('manDoc').value.trim();
+  var nombre = document.getElementById('manNombre').value.trim();
+  var grupo = document.getElementById('manGrupo').value.trim();
+  var status = document.getElementById('manualStatus');
+  
+  if (!doc || !nombre) { status.innerHTML = '❌ Documento y nombre son obligatorios'; return; }
+  
+  var client = initSupabase();
+  var result = await client.from('pparcial_estudiantes').upsert({
+    documento: doc, nombre: nombre, grupo: grupo, periodo: '2026-2'
+  }, { onConflict: 'documento' });
+  
+  if (result.error) {
+    status.innerHTML = '❌ Error: ' + result.error.message;
+  } else {
+    status.innerHTML = '✅ Estudiante agregado: ' + nombre;
+    document.getElementById('manDoc').value = '';
+    document.getElementById('manNombre').value = '';
+    document.getElementById('manGrupo').value = '';
+    showToast('Estudiante agregado');
+    loadDashboard();
+    loadEstudiantes();
+  }
+}
+
+// ═══════════════════════════════════════
+// ESTUDIANTES LIST
+// ═══════════════════════════════════════
+async function loadEstudiantes() {
+  var client = initSupabase();
+  var search = document.getElementById('searchDoc').value.trim();
+  var grupo = document.getElementById('filterGrupo').value;
+  
+  var query = client.from('pparcial_estudiantes').select('*').order('nombre');
+  if (search) query = query.ilike('documento', '%' + search + '%');
+  if (grupo) query = query.eq('grupo', grupo);
+  
+  var result = await query;
+  var data = result.data || [];
+  
+  // Get notas
+  var notasResult = await client.from('pparcial_intentos').select('documento, nota_final, estado');
+  var notasMap = {};
+  (notasResult.data || []).forEach(function(n) { notasMap[n.documento] = n; });
+  
+  var rows = '';
+  data.forEach(function(s) {
+    var nota = notasMap[s.documento];
+    var notaVal = nota ? nota.nota_final : null;
+    var estado = nota ? nota.estado : 'sin_iniciar';
+    var cls = notaVal >= 4 ? 'alta' : notaVal >= 3 ? 'media' : 'baja';
+    rows += '<tr><td>' + s.documento + '</td><td>' + s.nombre + '</td><td>' + (s.grupo||'') + '</td><td>' + estado + '</td><td class="nota ' + cls + '">' + (notaVal != null ? notaVal.toFixed(1) : '—') + '</td></tr>';
+  });
+  
+  document.getElementById('studentsTable').innerHTML = 
+    '<table><tr><th>Documento</th><th>Nombre</th><th>Grupo</th><th>Estado</th><th>Nota</th></tr>' + (rows || '<tr><td colspan="5">No hay estudiantes</td></tr>') + '</table>';
+  
+  // Update grupo filter
+  var grupos = [...new Set(data.map(function(s) { return s.grupo; }).filter(Boolean))];
+  var optHtml = '<option value="">Todos los grupos</option>';
+  grupos.forEach(function(g) { optHtml += '<option value="' + g + '">' + g + '</option>'; });
+  document.getElementById('filterGrupo').innerHTML = optHtml;
+}
+
+// ═══════════════════════════════════════
+// ENTREGAS
+// ═══════════════════════════════════════
+async function loadEntregas() {
+  var client = initSupabase();
+  var result = await client.from('pparcial_intentos').select('*').order('finalizado_en', { ascending: false });
+  var data = result.data || [];
+  
+  var rows = '';
+  data.forEach(function(r) {
+    var cls = (r.nota_final || 0) >= 4 ? 'alta' : (r.nota_final || 0) >= 3 ? 'media' : 'baja';
+    rows += '<tr>' +
+      '<td>' + r.documento + '</td>' +
+      '<td>' + (r.nombre||'') + '</td>' +
+      '<td>' + r.estado + '</td>' +
+      '<td>' + (r.extensiones_usadas||0) + '</td>' +
+      '<td>' + (r.penal_salidas||0) + '</td>' +
+      '<td class="nota ' + cls + '">' + (r.nota_final != null ? r.nota_final.toFixed(1) : '—') + '</td>' +
+      '</tr>';
+  });
+  
+  document.getElementById('entregasTable').innerHTML = 
+    '<table><tr><th>Documento</th><th>Nombre</th><th>Estado</th><th>Ext.</th><th>Salidas</th><th>Nota</th></tr>' + (rows || '<tr><td colspan="6">Aún no hay entregas</td></tr>') + '</table>';
+}
+
+// ═══════════════════════════════════════
+// EXPORT EXCEL
+// ═══════════════════════════════════════
+function exportExcel() {
+  var table = document.querySelector('#studentsTable table');
+  if (!table) return;
+  
+  var csv = '';
+  var rows = table.querySelectorAll('tr');
+  rows.forEach(function(row) {
+    var cols = row.querySelectorAll('th,td');
+    var rowData = [];
+    cols.forEach(function(col) { rowData.push('"' + col.textContent.replace(/"/g,'""') + '"'); });
+    csv += rowData.join(',') + '\n';
+  });
+  
+  var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'pparcial_estudiantes_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  showToast('Exportado como CSV (abre en Excel)');
+}
+
+// ═══════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.className = 'toast success'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3000);
+}
+
+// Keyboard: Enter on password field
+document.getElementById('passInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') login();
+});
+</script>
+</body>
+</html>
