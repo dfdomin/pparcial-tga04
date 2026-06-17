@@ -100,7 +100,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <input type="text" id="docInput" placeholder="Número de documento" autocomplete="off">
     <div id="studentPreview" style="font-size:0.72rem;color:var(--blue);margin:4px 0;min-height:20px"></div>
     <button class="btn btn-primary" id="btnStart" disabled onclick="startExam()">▶ Iniciar Parcial</button>
-    <p style="font-size:0.62rem;color:#555;margin-top:12px">Tiempo: 50 min · 9 preguntas · Sin retroceso · Intento único</p>
+    <p style="font-size:0.62rem;color:#555;margin-top:12px">⏱ 50 min · 9 preguntas · Sin retroceso · Intento único<br>🖥 Se requiere pantalla completa · Salir resta −0.2 pts<br>⏰ +5 min extra disponible (máx. 3, −0.5 pts c/u)</p>
   </div>
 </div>
 
@@ -404,6 +404,14 @@ function startExam() {
   var doc = document.getElementById('docInput').value.trim();
   if (!doc) return;
 
+  // Forzar pantalla completa
+  var el = document.documentElement;
+  if (el.requestFullscreen) {
+    el.requestFullscreen().catch(function() {
+      console.log('Fullscreen no disponible — continuando en ventana normal');
+    });
+  }
+
   state.documento = doc;
   state.nombre = document.getElementById('studentPreview').textContent || 'Estudiante';
   examVars = generateExamVars(doc);
@@ -684,9 +692,33 @@ function saveLocal(estado, notaFinal) {
 document.addEventListener('visibilitychange', function() {
   if (document.hidden && state.preguntaActual > 0) {
     state.penalSalidas++;
-    console.log('⚠ Salida de pantalla #' + state.penalSalidas + ' (−0.2 pts c/u)');
+    showIntegrityWarning('Cambiaste de pestaña o ventana. Penalización: −0.2 pts (total: −' + (state.penalSalidas * 0.2).toFixed(1) + ')');
   }
 });
+
+document.addEventListener('fullscreenchange', function() {
+  if (!document.fullscreenElement && state.preguntaActual > 0) {
+    state.penalSalidas++;
+    showIntegrityWarning('Saliste de pantalla completa. Penalización: −0.2 pts (total: −' + (state.penalSalidas * 0.2).toFixed(1) + '). Volviendo a pantalla completa...');
+    // Re-forzar fullscreen tras 1.5s
+    setTimeout(function() {
+      document.documentElement.requestFullscreen().catch(function(){});
+    }, 1500);
+  }
+});
+
+function showIntegrityWarning(msg) {
+  var w = document.getElementById('integrityWarning');
+  if (!w) {
+    w = document.createElement('div');
+    w.id = 'integrityWarning';
+    w.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:10px 16px;font-size:0.8rem;font-weight:700;z-index:200;display:none';
+    document.body.appendChild(w);
+  }
+  w.textContent = '⚠ ' + msg;
+  w.style.display = 'block';
+  setTimeout(function() { w.style.display = 'none'; }, 4000);
+}
 
 // ═══════════════════════════════════════
 // MOBILE DETECTION
