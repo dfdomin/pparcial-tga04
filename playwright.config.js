@@ -16,6 +16,8 @@ module.exports = defineConfig({
         baseURL: 'http://localhost:8765',
         viewport: { width: 1280, height: 800 },
         actionTimeout: 10000,
+        // Opcional: CHROMIUM_PATH=/ruta/a/chrome para usar un navegador ya instalado
+        ...(process.env.CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.CHROMIUM_PATH } } : {}),
       },
     },
   ],

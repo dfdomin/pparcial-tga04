@@ -60,6 +60,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .output-panel .ok { color: var(--green); }
 .output-panel .err { color: var(--red); }
 .output-panel .info { color: var(--muted); }
+.output-panel .tip { color: #fcd34d; font-family: var(--font); }
+.output-panel .pymsg { color: #6b7280; font-size: 0.7rem; }
+.output-panel code { background: #1e1e3a; padding: 0 4px; border-radius: 4px; }
 
 /* Bottom bar */
 .bottombar { grid-column: 1/-1; background: var(--panel); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 0.72rem; }
@@ -102,7 +105,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
       <strong style="color:var(--orange)">⚠ Reglas del módulo</strong><br>
       ▪ La inasistencia máxima es de <strong style="color:var(--red)">10.4 horas</strong> (20% de 52h).<br>
       ▪ Cada clase equivale a <strong>4 horas</strong>. Faltar 2 días = 8 horas acumuladas.<br>
-      ▪ Si superás las 10.4h, <strong style="color:var(--red)">perdés el módulo</strong>.<br>
+      ▪ Si superas las 10.4h, <strong style="color:var(--red)">pierdes el módulo</strong>.<br>
       <strong style="color:var(--accent);display:block;margin-top:6px">📊 Composición de la nota</strong>
       ▪ <strong>Parcial:</strong> 60% &nbsp;|&nbsp; <strong>Formativa:</strong> 40%<br>
       ▪ Este parcial equivale al <strong>60%</strong> de tu nota final del módulo.
@@ -145,7 +148,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 
   <div class="editor-panel">
     <div class="code-base" id="codeBase"></div>
-    <textarea id="codeEditor" placeholder="# Escribe tu código aquí..." spellcheck="false"></textarea>
+    <textarea id="codeEditor" placeholder="# Escribe tu código aquí... (Ctrl+Enter para ejecutar)" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     <div class="output-panel" id="outputPanel"><span class="info">▶ Haz clic en Ejecutar para probar tu código</span></div>
   </div>
 
@@ -155,7 +158,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
       <button class="btn btn-success" id="btnRun" onclick="runCode()">▶ Ejecutar</button>
       <button class="btn btn-primary" id="btnSubmit" onclick="submitAnswer()" disabled>✓ Enviar respuesta</button>
     </div>
-    <button class="btn" style="background:#555;color:#fff;font-size:0.72rem;padding:6px 12px" onclick="skipQuestion()">Saltar →</button>
+    <button class="btn" style="background:#555;color:#fff;font-size:0.72rem;padding:6px 12px" id="btnSkip" onclick="skipQuestion()">Saltar →</button>
   </div>
 </div>
 
@@ -191,7 +194,9 @@ var state = {
   penalReintentos: 0,
   retryCount: 0,
   intentoId: null,
-  codeExecuted: false  // Para evitar envíos accidentales
+  codeExecuted: false,  // Para evitar envíos accidentales
+  examActive: false,    // true solo mientras el parcial está en curso
+  advancing: false      // true durante la pausa antes de pasar a la siguiente pregunta
 };
 
 // ═══════════════════════════════════════
@@ -218,13 +223,330 @@ function getSupabase() {
 // ═══════════════════════════════════════
 // PYODIDE
 // ═══════════════════════════════════════
-var pyodide = null, pyReady = false;
-async function initPy() {
-  if (pyReady) return pyodide;
-  if (typeof loadPyodide !== 'function') { await new Promise(r=>setTimeout(r,500)); }
-  pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/' });
-  pyReady = true;
-  return pyodide;
+var PYODIDE_INDEX_URL = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/';
+var pyodide = null, pyReady = false, pyLoading = null, pyBusy = false;
+
+// Ejecutor en Python: cada ejecución usa un espacio de variables NUEVO (lo que el
+// estudiante haga en una pregunta, p. ej. `print = 5`, no afecta a las demás),
+// captura la salida con sus saltos de línea, limita tiempo/salida (ciclos infinitos),
+// corrige comillas/guiones copiados de Word/WhatsApp y describe el error con la
+// línea exacta del código del estudiante (sin contar el código base).
+var PY_RUNNER = String.raw`
+import sys, io, time, json, difflib, builtins, textwrap, ast, unicodedata
+
+class _PPTimeout(Exception): pass
+class _PPTooMuchOutput(Exception): pass
+class _PPInputUsed(Exception): pass
+
+class _PPOut(io.StringIO):
+    LIMIT = 20000
+    def write(self, s):
+        room = self.LIMIT - self.tell()
+        if len(s) > room:
+            if room > 0:
+                io.StringIO.write(self, s[:room])
+            raise _PPTooMuchOutput()
+        return io.StringIO.write(self, s)
+
+_PP_MAP = {
+    '“': '"', '”': '"', '„': '"', '‟': '"', '«': '"', '»': '"', '″': '"',
+    '‘': "'", '’': "'", '‚': "'", '‛': "'", '´': "'", '′': "'",
+    '–': '-', '—': '-', '−': '-',
+    '（': '(', '）': ')', '＝': '=', '，': ',', '：': ':',
+}
+_PP_ZW = '​‌‍⁠﻿'
+
+def _pp_fix(src):
+    out = []
+    for ch in src:
+        if ch in _PP_MAP:
+            out.append(_PP_MAP[ch])
+        elif ch in _PP_ZW:
+            continue
+        elif ch not in '\n\t' and unicodedata.category(ch) == 'Zs':
+            out.append(' ')
+        else:
+            out.append(ch)
+    return textwrap.dedent(''.join(out))
+
+def _pp_compile(src):
+    try:
+        return compile(src, '<tu_codigo>', 'exec'), src, False
+    except SyntaxError:
+        fixed = _pp_fix(src)
+        if fixed == src:
+            raise
+        return compile(fixed, '<tu_codigo>', 'exec'), fixed, True
+
+def _pp_norm(s):
+    s = unicodedata.normalize('NFD', s.casefold())
+    return ''.join(c for c in s if unicodedata.category(c) != 'Mn').replace('_', '')
+
+def _pp_describe(e, src, g):
+    info = {'type': type(e).__name__, 'msg': '', 'line': None, 'code': '',
+            'name': None, 'suggest': None, 'later': False, 'where': 'user'}
+    if isinstance(e, SyntaxError):
+        info['msg'] = e.msg or ''
+        if e.filename == '<tu_codigo>':
+            info['line'] = e.lineno
+            info['code'] = (e.text or '').strip()
+    else:
+        info['msg'] = str(e)
+        tb, ln = e.__traceback__, None
+        while tb is not None:
+            if tb.tb_frame.f_code.co_filename == '<tu_codigo>':
+                ln = tb.tb_lineno
+            tb = tb.tb_next
+        info['line'] = ln
+        lines = src.split('\n')
+        if ln and 0 < ln <= len(lines):
+            info['code'] = lines[ln - 1].strip()
+    if isinstance(e, NameError) and getattr(e, 'name', None):
+        name = e.name
+        info['name'] = name
+        assigned = {}
+        try:
+            for node in ast.walk(ast.parse(src)):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    assigned[node.id] = min(assigned.get(node.id, node.lineno), node.lineno)
+        except Exception:
+            pass
+        if name in assigned and info['line'] and assigned[name] > info['line']:
+            info['later'] = True
+        cands = set(k for k in g if not k.startswith('_')) | set(assigned)
+        cands |= set(k for k in dir(builtins) if not k.startswith('_'))
+        cands.discard(name)
+        exact = sorted(c for c in cands if _pp_norm(c) == _pp_norm(name))
+        if exact:
+            info['suggest'] = exact[0]
+        else:
+            m = difflib.get_close_matches(name, sorted(cands), n=1, cutoff=0.8)
+            info['suggest'] = m[0] if m else None
+    return info
+
+def __pp_run(base, user, timeout=3.0):
+    res = {'stdout': '', 'error': None, 'autofix': False}
+    out = _PPOut()
+    g = {'__name__': '__main__'}
+    def _no_input(*a, **k):
+        raise _PPInputUsed()
+    g['input'] = _no_input
+    old_out, old_err, old_limit = sys.stdout, sys.stderr, sys.getrecursionlimit()
+    sys.stdout, sys.stderr = out, io.StringIO()
+    src = user
+    try:
+        try:
+            exec(compile(base, '<base>', 'exec'), g)
+        except BaseException as e:
+            res['error'] = _pp_describe(e, '', g)
+            res['error']['where'] = 'base'
+        if res['error'] is None:
+            code, src, fixed = _pp_compile(user)
+            res['autofix'] = fixed
+            start, n = time.monotonic(), [0]
+            def tracer(frame, event, arg):
+                n[0] += 1
+                if (n[0] & 127) == 0 and time.monotonic() - start > timeout:
+                    raise _PPTimeout()
+                return tracer
+            sys.setrecursionlimit(400)
+            sys.settrace(tracer)
+            try:
+                exec(code, g)
+            finally:
+                sys.settrace(None)
+                sys.setrecursionlimit(old_limit)
+    except SystemExit:
+        pass
+    except BaseException as e:
+        res['error'] = _pp_describe(e, src, g)
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+    res['stdout'] = out.getvalue()
+    return json.dumps(res)
+`;
+
+function initPy() {
+  if (pyReady) return Promise.resolve(pyodide);
+  if (!pyLoading) {
+    pyLoading = (async function() {
+      for (var i = 0; i < 40 && typeof loadPyodide !== 'function'; i++) {
+        await new Promise(function(r) { setTimeout(r, 250); });
+      }
+      if (typeof loadPyodide !== 'function') throw new Error('PYODIDE_SCRIPT_NO_CARGO');
+      var p = await loadPyodide({ indexURL: PYODIDE_INDEX_URL });
+      p.runPython(PY_RUNNER);
+      pyodide = p;
+      pyReady = true;
+      return p;
+    })().catch(function(e) { pyLoading = null; throw e; });
+  }
+  return pyLoading;
+}
+
+// Ejecuta el código del estudiante para la pregunta qNum.
+// Devuelve { stdout, error, autofix }.
+async function executeStudentCode(qNum, userCode) {
+  var q = questions[qNum - 1];
+  var py = await initPy();
+  var fn = py.globals.get('__pp_run');
+  try {
+    return JSON.parse(fn(q.codeBase(examVars), String(userCode).replace(/\r\n?/g, '\n'), 3.0));
+  } catch (e) {
+    // Si Pyodide quedó en mal estado, se recarga en el próximo intento
+    pyReady = false; pyLoading = null; pyodide = null;
+    throw e;
+  } finally {
+    try { fn.destroy(); } catch (_) {}
+  }
+}
+
+// ═══════════════════════════════════════
+// MENSAJES DE ERROR AMIGABLES (para el estudiante, en español)
+// ═══════════════════════════════════════
+var BUILTIN_FUNCS = ['print', 'max', 'min', 'type', 'sum', 'round', 'len', 'str', 'int', 'float', 'abs'];
+
+function explainError(er) {
+  var t = er.type || '', m = er.msg || '', n = er.name || '', s = er.suggest || '';
+  var code = er.code || '';
+  if (t === '_PPTimeout') return 'Tu código tardó demasiado (más de 3 segundos) y se detuvo. ¿Hay un ciclo <code>while</code> que nunca termina?';
+  if (t === '_PPTooMuchOutput') return 'Tu código muestra demasiado texto y se detuvo. ¿Hay un ciclo que nunca termina?';
+  if (t === '_PPInputUsed') return 'En este parcial no se usa <code>input()</code>. Escribe los valores directamente en las variables, por ejemplo: <code>total_compra = 45000</code>';
+  if (t === 'IndentationError' || t === 'TabError') {
+    if (/unexpected indent/.test(m)) return 'Esta línea tiene espacios al inicio que sobran. En este parcial cada línea empieza pegada al borde izquierdo: borra los espacios del comienzo de la línea.';
+    return 'Hay un problema con los espacios al inicio de las líneas. Haz que cada línea empiece pegada al borde izquierdo.';
+  }
+  if (t === 'SyntaxError') {
+    if (/unterminated (triple-quoted )?string|EOL while scanning/.test(m)) return 'Falta cerrar unas comillas. Todo texto abre y cierra con el mismo tipo de comillas: <code>"así"</code> o <code>\'así\'</code>.';
+    if (/was never closed/.test(m)) return 'Abriste un paréntesis <code>(</code> que nunca cerraste. Debe haber tantos <code>(</code> como <code>)</code>.';
+    if (/unmatched '\)'/.test(m)) return 'Sobra un paréntesis de cierre <code>)</code>. Debe haber tantos <code>(</code> como <code>)</code>.';
+    if (/does not match opening parenthesis|unmatched/.test(m)) return 'Los paréntesis no coinciden. Revisa que cada <code>(</code> cierre con <code>)</code>.';
+    if (/Missing parentheses in call to 'print'/.test(m)) return 'En Python 3, <code>print</code> lleva paréntesis: <code>print("hola")</code> o <code>print(variable)</code>.';
+    if (/forgot a comma/.test(m)) return 'Falta una coma entre dos elementos, o faltan comillas alrededor de un texto. Ejemplo correcto: <code>print("Total:", total)</code>';
+    if (/invalid character|non-printable/.test(m)) return 'Hay un símbolo no válido (por ejemplo, comillas o guiones copiados de Word o WhatsApp). Bórralo y escríbelo de nuevo con el teclado.';
+    if (/invalid decimal literal/.test(m)) return 'Un nombre de variable no puede empezar con un número (ej: <code>5ventas</code>) ni tener espacios. Usa nombres como <code>ventas_5</code> o <code>total_ventas</code>.';
+    if (/expected ':'/.test(m)) return 'Falta <code>:</code> al final de la línea (después de <code>if</code>, <code>for</code>, <code>while</code> o <code>def</code>).';
+    if (/f-string/.test(m)) return 'Revisa las llaves dentro del <code>f"..."</code>: cada <code>{</code> debe cerrarse con <code>}</code>.';
+    if (/cannot assign|Maybe you meant '=='/.test(m)) return 'A la izquierda del <code>=</code> solo va el nombre de la variable. Ejemplo: <code>total = enero + febrero</code>';
+    if (/^\s*[A-Za-zÁÉÍÓÚáéíóúñÑ_]\w*\s+[A-Za-zÁÉÍÓÚáéíóúñÑ_]\w*\s*=/.test(code)) return 'Los nombres de variables no pueden tener espacios. Usa guion bajo: <code>total_ventas = ...</code>';
+    return 'Python no entiende cómo está escrita esta línea. Revisa: nombres de variables sin espacios (usa guion bajo), comillas y paréntesis completos, y un solo <code>=</code> para guardar un valor.';
+  }
+  if (t === 'NameError' && n) {
+    if (s && BUILTIN_FUNCS.indexOf(s) !== -1 && s.toLowerCase() === n.toLowerCase()) return 'Python distingue mayúsculas y minúsculas: escribe <code>' + escapeHtml(s) + '</code> (todo en minúscula).';
+    if (er.later) return 'Usas <code>' + escapeHtml(n) + '</code> antes de crearla. Mueve la línea donde creas <code>' + escapeHtml(n) + '</code> más arriba.';
+    if (s) return 'La variable <code>' + escapeHtml(n) + '</code> no existe. ¿Quisiste decir <code>' + escapeHtml(s) + '</code>? El nombre debe escribirse exactamente igual en todas partes (mayúsculas, tildes y guiones bajos cuentan).';
+    return 'La variable <code>' + escapeHtml(n) + '</code> no existe todavía. Créala primero (ejemplo: <code>' + escapeHtml(n) + ' = ...</code>). Si querías escribir un texto, ponlo entre comillas: <code>"' + escapeHtml(n) + '"</code>.';
+  }
+  if (t === 'TypeError') {
+    if (/can only concatenate str/.test(m)) return 'No puedes unir texto y número con <code>+</code>. Usa coma dentro del print: <code>print("Total:", total)</code>';
+    if (/unsupported operand.*'tuple'/.test(m)) return 'Parece que escribiste un número con coma, como <code>45,000</code>. En Python los números van sin separador de miles: <code>45000</code>.';
+    if (/unsupported operand.*'str'/.test(m)) return 'Estás haciendo una operación entre un número y un texto. Un número entre comillas (<code>"50"</code>) es texto: quítale las comillas para poder calcular.';
+    if (/object is not callable/.test(m)) return 'Usaste el nombre de una función (<code>print</code>, <code>max</code>, <code>min</code>, <code>type</code>…) como variable, por ejemplo <code>print = ...</code> o <code>max = ...</code>. Ponle otro nombre a tu variable (ej: <code>mayor = max(enero, febrero, marzo)</code>).';
+    if (/not supported between instances/.test(m)) return 'Estás comparando números con textos (por ejemplo dentro de <code>max()</code> o <code>min()</code>). Revisa que todas las variables sean números, sin comillas.';
+    if (/invalid keyword argument for print/.test(m)) return 'Dentro de <code>print()</code> no se crean variables con <code>=</code>. Primero crea la variable en su propia línea (<code>total = enero + febrero</code>) y luego muéstrala: <code>print(total)</code>.';
+    if (/argument/.test(m)) return 'La función recibió una cantidad de valores incorrecta. Revisa lo que pusiste dentro de los paréntesis.';
+    return 'Revisa los tipos de datos: los textos (con comillas) y los números (sin comillas) no se mezclan en operaciones.';
+  }
+  if (t === 'ZeroDivisionError') return 'Estás dividiendo entre cero. Revisa el número por el que divides.';
+  if (t === 'ValueError') return 'Ese valor no se puede convertir a número. Dentro de <code>int()</code> o <code>float()</code> solo debe haber dígitos.';
+  if (t === 'AttributeError') return 'Ese dato no tiene esa función. Revisa lo que escribiste después del punto.';
+  if (t === 'RecursionError') return 'Una función se llama a sí misma sin parar.';
+  if (t === 'ModuleNotFoundError' || t === 'ImportError') return 'Ese módulo no está disponible en el parcial. No necesitas importar nada.';
+  return '';
+}
+
+function renderRunResult(res) {
+  var html = '';
+  if (res.autofix) {
+    html += '<span class="info">ℹ Se corrigieron automáticamente comillas o símbolos copiados (“ ” → " "). La próxima vez escríbelos desde el teclado.</span>\n';
+  }
+  var txt = (res.stdout || '').replace(/\s+$/, '');
+  if (txt) html += '<span class="ok">' + escapeHtml(txt) + '</span>\n';
+  var er = res.error;
+  if (er) {
+    if (er.where === 'base') {
+      html += '<span class="err">⚠ Error interno en el código base de la pregunta. Avísale al docente.</span>';
+      return html;
+    }
+    var tipo = er.type.charAt(0) === '_' ? '' : er.type + ': ' + er.msg;
+    html += '<span class="err">❌ Error' + (er.line ? ' en la línea ' + er.line : '') + (er.code ? ':  ' + escapeHtml(er.code) : '') + '</span>\n';
+    var tip = explainError(er);
+    if (tip) html += '<span class="tip">💡 ' + tip + '</span>\n';
+    if (tipo) html += '<span class="pymsg">' + escapeHtml(tipo) + '</span>';
+  } else if (!txt) {
+    var code = document.getElementById('codeEditor').value;
+    if (/(^|[^\w.])print\s*=(?!=)/m.test(code)) {
+      html += '<span class="err">⚠ Escribiste <code>print =</code>. print es una función: se usa con paréntesis, sin el signo igual: <code>print(variable)</code>.</span>';
+    } else {
+      html += '<span class="info">(sin salida) Tu código se ejecutó, pero no muestra nada. Usa <code>print()</code> para mostrar el resultado.</span>';
+    }
+  }
+  return html.replace(/\n$/, '');
+}
+
+function renderLoadError() {
+  return '<span class="err">⚠ No se pudo cargar Python. Revisa tu conexión a internet y vuelve a pulsar ▶ Ejecutar. Si el problema sigue, avísale al docente.</span>';
+}
+
+function setBusy(b) {
+  pyBusy = b;
+  document.getElementById('btnRun').disabled = b || state.advancing;
+  document.getElementById('btnSubmit').disabled = b || state.advancing || !state.codeExecuted;
+}
+
+function nextPaint() { return new Promise(function(r) { setTimeout(r, 30); }); }
+
+// ═══════════════════════════════════════
+// CALIFICACIÓN DE LA SALIDA
+// ═══════════════════════════════════════
+function normText(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function numTokens(s) {
+  var variants = [s, s.replace(/(\d)[.,](?=\d{3}(?!\d))/g, '$1')]; // admite 55,000 / 55.000
+  var toks = [];
+  variants.forEach(function(v) {
+    (v.match(/-?\d+(?:\.\d+)?/g) || []).forEach(function(x) { toks.push(parseFloat(x)); });
+  });
+  return toks;
+}
+
+// Devuelve { ok: bool, missing: [índices de las partes esperadas que no aparecen] }
+function gradeOutput(q, txt) {
+  var parts = q.outputMatch(examVars).split('\n').filter(function(p) { return p.trim(); });
+  var normOut = normText(txt);
+  var toks = numTokens(txt);
+  var missing = [];
+  parts.forEach(function(part, i) {
+    var p = normText(part), found;
+    if (/^-?\d+(\.\d+)?$/.test(p)) {
+      var e = parseFloat(p);
+      var tol = Number.isInteger(e) ? 1e-9 : 0.051; // promedio: acepta redondeo a 1 o 2 decimales
+      found = toks.some(function(a) { return Math.abs(a - e) <= tol; });
+    } else {
+      found = normOut.indexOf(p) !== -1;
+    }
+    if (!found) missing.push(i);
+  });
+  return { ok: missing.length === 0 && txt.trim().length > 0, missing: missing, parts: parts };
+}
+
+function wrongAnswerHint(q, verdict, txt, code) {
+  var numeric = verdict.parts.some(function(p) { return /^-?\d+(\.\d+)?$/.test(p.trim()); });
+  if (numeric && /\b\d{1,3}\.\d{3}\b/.test(code)) {
+    return 'Ojo: en Python <code>45.000</code> significa 45 con decimales, no cuarenta y cinco mil. Escribe los números sin puntos: <code>45000</code>.';
+  }
+  if (numeric && !/\d/.test(txt)) {
+    return 'Tu salida no muestra ningún número. Si pusiste el nombre de la variable entre comillas (<code>"total"</code>), Python muestra la palabra, no el valor: usa <code>print(total)</code> sin comillas.';
+  }
+  if (q.hints) {
+    for (var i = 0; i < verdict.missing.length; i++) {
+      var h = q.hints[verdict.missing[i]];
+      if (h) return typeof h === 'function' ? h(examVars) : h;
+    }
+  }
+  return 'Tu código funciona, pero el resultado no es el que pide el enunciado. Revisa los valores y la operación.';
 }
 
 // ═══════════════════════════════════════
@@ -269,6 +591,7 @@ var questions = [
     vars: 'empresa (str)',
     codeBase: function(v) { return '# Contexto: indicadores de gestión organizacional\n# Usa variables para almacenar datos del negocio\n\n'; },
     outputMatch: function(v) { return v.empresa; },
+    hints: [function(v) { return 'Revisa que el texto sea exactamente <code>' + v.empresa + '</code> (puedes copiarlo del enunciado).'; }],
     outputType: 'contains',
     ce: 'CE1, CE4', tiempo: 3,
     hint: 'Recuerda: las comillas indican texto. print(nombre_variable) muestra el valor.'
@@ -279,6 +602,7 @@ var questions = [
     vars: 'empresa (ya definida)',
     codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
     outputMatch: function(v) { return v.empresa; },
+    hints: [function(v) { return 'La salida debe incluir el valor de la variable <code>empresa</code>. Usa la variable sin comillas: <code>print("Empresa:", empresa)</code>.'; }],
     outputType: 'contains',
     ce: 'CE1, CE4', tiempo: 3,
     hint: 'print("cualquier texto", empresa) — no importa el mensaje, solo que muestre el valor de empresa.'
@@ -288,7 +612,9 @@ var questions = [
     enun: function(v) { return 'Crea una variable <code>codigo</code> con el valor <code>' + v.precio_a + '</code> como <strong>número</strong> y otra variable <code>codigo_str</code> con el valor <code>"' + v.precio_a + '"</code> como <strong>texto</strong>. Usa <code>type()</code> dentro de <code>print()</code> para mostrar el tipo de cada una.'; },
     vars: 'codigo (int), codigo_str (str)',
     codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
-    outputMatch: function() { return "<class 'int'>"; },
+    outputMatch: function() { return "<class 'int'>\n<class 'str'>"; },
+    hints: ['Falta mostrar el tipo de la variable numérica <code>codigo</code>. Recuerda: el número va sin comillas y se muestra con <code>print(type(codigo))</code>.',
+            'Falta mostrar el tipo de la variable de texto <code>codigo_str</code>. Recuerda: el texto va entre comillas y se muestra con <code>print(type(codigo_str))</code>.'],
     outputType: 'contains',
     ce: 'CE1', tiempo: 5,
     hint: 'Sin comillas = número. Con comillas = texto. type(variable) devuelve el tipo.'
@@ -333,6 +659,8 @@ var questions = [
       var minv = Math.min(v.ventas_ene, v.ventas_feb, v.ventas_mar);
       return String(maxv) + '\n' + String(minv);
     },
+    hints: ['Falta mostrar el valor <strong>mayor</strong>: usa <code>max(enero, febrero, marzo)</code>.',
+            'Falta mostrar el valor <strong>menor</strong>: usa <code>min(enero, febrero, marzo)</code>.'],
     outputType: 'contains',
     ce: 'CE2', tiempo: 4,
     hint: 'max(enero, febrero, marzo) sin corchetes. min() igual.'
@@ -346,7 +674,7 @@ var questions = [
         '📥 <strong>Entrada:</strong> <code>total_compra = ' + compra + '</code> y <code>pago_con = ' + pago + '</code><br>' +
         '⚙️ <strong>Operación:</strong> restar (<code>pago_con - total_compra</code>)<br>' +
         '📤 <strong>Salida:</strong> mostrar el vuelto con <code>print()</code><br><br>' +
-        '<em>Escribí el algoritmo completo: definí las variables, calculá el vuelto y mostralo.</em>';
+        '<em>Escribe el algoritmo completo: define las variables, calcula el vuelto y muéstralo.</em>';
     },
     vars: 'total_compra, pago_con, vuelto',
     codeBase: function(v) { return '# Algoritmo: calcular vuelto\n# Entrada → Operación → Salida\n\n'; },
@@ -371,8 +699,12 @@ var questions = [
       var abr = rng2(v,55,95), may = rng2(v,50,98), jun = rng2(v,40,90);
       var tot = abr + may + jun;
       var avg = tot / 3;
-      return 'Total' + '\n' + 'Promedio' + '\n' + String(Math.round(avg*100)/100);
+      return 'Total' + '\n' + String(tot) + '\n' + 'Promedio' + '\n' + String(Math.round(avg*100)/100);
     },
+    hints: ['Falta el mensaje descriptivo con la palabra <strong>Total</strong>, por ejemplo: <code>print("Total:", total_q2)</code>.',
+            'El valor del total no aparece o no es correcto. Revisa la suma <code>abril + mayo + junio</code>.',
+            'Falta el mensaje descriptivo con la palabra <strong>Promedio</strong>, por ejemplo: <code>print("Promedio:", promedio_q2)</code>.',
+            'El valor del promedio no aparece o no es correcto. Recuerda: <code>promedio = total / 3</code>.'],
     outputType: 'contains',
     ce: 'CE1, CE2, CE4', tiempo: 5,
     hint: 'total = abril + mayo + junio ; promedio = total / 3 ; print("Total:", total)'
@@ -442,6 +774,8 @@ function startExam() {
   }
 
   state.documento = doc;
+  state.examActive = true;
+  state.penalSalidas = 0; // las salidas antes de iniciar no cuentan
   state.nombre = document.getElementById('studentPreview').textContent || 'Estudiante';
   examVars = generateExamVars(doc);
 
@@ -455,6 +789,9 @@ function startExam() {
 
   // Guardar intento en Supabase
   saveAttempt('en_progreso');
+
+  // Precargar Python mientras el estudiante lee la primera pregunta
+  initPy().catch(function(e) { console.log('Precarga de Python falló:', e && e.message); });
 }
 
 function loadQuestion(num) {
@@ -472,8 +809,10 @@ function loadQuestion(num) {
   document.getElementById('tiempoPrudente').textContent = '⏱ Tiempo sugerido: ' + q.tiempo + ' min';
   document.getElementById('outputPanel').innerHTML = '<span class="info">▶ Haz clic en Ejecutar para probar tu código</span>';
   document.getElementById('retryCount').textContent = '0';
-  document.getElementById('btnSubmit').disabled = true;
   state.codeExecuted = false;
+  state.advancing = false;
+  setBusy(false);
+  resetSkipButton();
 
   // Actualizar panel de contexto con respuestas anteriores
   updateContextPanel();
@@ -499,16 +838,33 @@ function updateContextPanel() {
 // ═══════════════════════════════════════
 // SALTAR PREGUNTA
 // ═══════════════════════════════════════
+var skipTimer = null;
+function resetSkipButton() {
+  var b = document.getElementById('btnSkip');
+  if (skipTimer) { clearTimeout(skipTimer); skipTimer = null; }
+  if (b) { b.dataset.confirm = ''; b.textContent = 'Saltar →'; b.style.background = '#555'; }
+}
+
 function skipQuestion() {
-  if (!confirm('¿Saltar esta pregunta? Obtendrás 0 puntos y avanzarás a la siguiente.')) return;
-  
+  if (!state.examActive || state.advancing || pyBusy) return;
+  // Confirmación con doble clic (sin confirm(), que puede sacar de pantalla completa y penalizar)
+  var b = document.getElementById('btnSkip');
+  if (b.dataset.confirm !== '1') {
+    b.dataset.confirm = '1';
+    b.textContent = '¿Seguro? 0 pts · clic otra vez';
+    b.style.background = 'var(--red)';
+    skipTimer = setTimeout(resetSkipButton, 4000);
+    return;
+  }
+  resetSkipButton();
+
   state.respuestas[state.preguntaActual - 1] = {
     correcta: false,
     codigo: '',
     salida: '(pregunta saltada)',
     intentos: 0
   };
-  
+
   if (state.preguntaActual >= 9) {
     finishExam();
   } else {
@@ -532,44 +888,25 @@ function renderProgressDots() {
 // CODE EXECUTION
 // ═══════════════════════════════════════
 async function runCode() {
-  var q = questions[state.preguntaActual - 1];
-  var fullCode = q.codeBase(examVars) + '\n' + document.getElementById('codeEditor').value;
+  if (pyBusy || state.advancing || !state.examActive) return;
   var out = document.getElementById('outputPanel');
-  out.innerHTML = '<span class="info">Ejecutando...</span>';
-
+  var code = document.getElementById('codeEditor').value;
+  if (!code.trim()) {
+    out.innerHTML = '<span class="info">Escribe tu código en el editor y luego pulsa ▶ Ejecutar.</span>';
+    return;
+  }
+  setBusy(true);
+  out.innerHTML = '<span class="info">' + (pyReady ? 'Ejecutando...' : 'Cargando Python (solo la primera vez, puede tardar unos segundos)...') + '</span>';
+  await nextPaint();
   try {
-    var py = await initPy();
-    var stdout = []; 
-    py.setStdout({ batched: function(s) { stdout.push(s); } });
-    await py.runPythonAsync(fullCode);
-    var txt = stdout.join('');
-    
-    if (!txt.trim()) {
-      // Salida vacía — posible print= en vez de print()
-      var code = document.getElementById('codeEditor').value;
-      if (code.indexOf('print =') !== -1 || code.indexOf('print=') !== -1) {
-        out.innerHTML = '<span class="err">⚠ Parece que usaste <code>print =</code> en vez de <code>print(</code>. Corregilo y volvé a ejecutar.</span>';
-      } else {
-        out.innerHTML = '<span class="info">(sin salida — ¿escribiste print()?)</span>';
-      }
-    } else {
-      out.innerHTML = '<span class="ok">' + escapeHtml(txt.trim()) + '</span>';
-    }
-    
-    // Habilitar botón Enviar
+    var res = await executeStudentCode(state.preguntaActual, code);
+    out.innerHTML = renderRunResult(res);
     state.codeExecuted = true;
-    document.getElementById('btnSubmit').disabled = false;
-    document.getElementById('btnSubmit').textContent = '✓ Enviar respuesta';
-    
-  } catch(e) {
-    var msg = e.message;
-    if (msg.indexOf('SyntaxError') !== -1) {
-      out.innerHTML = '<span class="err">❌ Error de sintaxis. Revisá: ¿usaste <code>print =</code> en vez de <code>print(</code>? ¿Faltan paréntesis o comillas?</span>';
-    } else {
-      out.innerHTML = '<span class="err">' + escapeHtml(msg) + '</span>';
-    }
-    state.codeExecuted = true;
-    document.getElementById('btnSubmit').disabled = false;
+  } catch (e) {
+    console.log('runCode error:', e && e.message);
+    out.innerHTML = renderLoadError();
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -579,96 +916,85 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 // SUBMIT
 // ═══════════════════════════════════════
 async function submitAnswer() {
+  if (pyBusy || state.advancing || !state.examActive) return;
   var q = questions[state.preguntaActual - 1];
-  var fullCode = q.codeBase(examVars) + '\n' + document.getElementById('codeEditor').value;
   var out = document.getElementById('outputPanel');
-
-  try {
-    var py = await initPy();
-    var stdout = []; 
-    py.setStdout({ batched: function(s) { stdout.push(s); } });
-    await py.runPythonAsync(fullCode);
-    var txt = stdout.join('').trim();
-
-    var expected = q.outputMatch(examVars);
-    var isCorrect = false;
-
-    if (q.outputType === 'contains') {
-      // Normalizar espacios: colapsar múltiples espacios en uno
-      var normTxt = txt.replace(/\s+/g, ' ').trim().toLowerCase();
-      var parts = expected.split('\n').filter(function(p) { return p.trim(); });
-      var allFound = true;
-      for (var i = 0; i < parts.length; i++) {
-        var normPart = parts[i].replace(/\s+/g, ' ').trim().toLowerCase();
-        var found = normTxt.indexOf(normPart) !== -1;
-        
-        // Si no encuentra por string, intentar comparación numérica con tolerancia
-        if (!found) {
-          var numExpected = parseFloat(normPart);
-          if (!isNaN(numExpected) && normPart.length > 0) {
-            // Buscar todos los números en la salida y comparar con tolerancia 0.1%
-            var numMatches = normTxt.match(/-?\d+\.?\d*/g) || [];
-            for (var j = 0; j < numMatches.length; j++) {
-              var numActual = parseFloat(numMatches[j]);
-              if (!isNaN(numActual) && Math.abs(numActual - numExpected) / Math.max(Math.abs(numExpected), 1) < 0.001) {
-                found = true;
-                break;
-              }
-            }
-          }
-        }
-        
-        if (!found) { allFound = false; break; }
-      }
-      isCorrect = allFound && txt.length > 0;
-    }
-
-    var retries = state.retryCount;
-    var maxRetries = 6; // 7 envíos totales (1 inicial + 6 reintentos)
-    var puntosBase = isCorrect ? Math.max(0.3, 1 - (retries * 0.1)) : 0;
-
-    state.respuestas[state.preguntaActual - 1] = {
-      correcta: isCorrect,
-      codigo: document.getElementById('codeEditor').value,
-      salida: txt,
-      intentos: retries + 1
-    };
-
-    if (isCorrect || retries >= maxRetries) {
-      // Avanzar
-      if (isCorrect) {
-        var pct = Math.round(puntosBase * 100);
-        out.innerHTML = '<span class="ok">✅ ¡Correcto! (' + pct + '% del valor)</span>';
-      } else {
-        out.innerHTML = '<span class="err">❌ Sin más reintentos (' + (maxRetries+1) + ' envíos). Avanzando...</span>';
-      }
-
-      if (state.preguntaActual >= 9) {
-        setTimeout(finishExam, 1500);
-      } else {
-        setTimeout(function() { loadQuestion(state.preguntaActual + 1); }, 1500);
-      }
-    } else {
-      state.retryCount++;
-      document.getElementById('retryCount').textContent = state.retryCount;
-      var remaining = maxRetries - retries;
-      var nextPct = Math.round(Math.max(0.3, 1 - (state.retryCount * 0.1)) * 100);
-      var msg = '❌ La respuesta no coincide. Intento ' + (retries+2) + ' de ' + (maxRetries+1) + ' (' + nextPct + '% del valor). Revisá bien.';
-      out.innerHTML = '<span class="err">' + msg + '</span>';
-    }
-
-    // Guardar en Supabase  
-    saveResponse(state.preguntaActual, isCorrect, puntosBase, retries + 1);
-
-  } catch(e) {
-    out.innerHTML = '<span class="err">Error: ' + escapeHtml(e.message) + '</span>';
+  var code = document.getElementById('codeEditor').value;
+  if (!code.trim()) {
+    out.innerHTML = '<span class="info">El editor está vacío. Escribe tu código antes de enviar (este envío no cuenta).</span>';
+    return;
   }
+  setBusy(true);
+  out.innerHTML = '<span class="info">Revisando tu respuesta...</span>';
+  await nextPaint();
+
+  var res;
+  try {
+    res = await executeStudentCode(state.preguntaActual, code);
+  } catch (e) {
+    console.log('submitAnswer error:', e && e.message);
+    out.innerHTML = renderLoadError();
+    setBusy(false);
+    return;
+  }
+
+  // Errores de programación o salida vacía: se explica y NO cuenta como intento
+  var txt = (res.stdout || '').trim();
+  if (res.error || !txt) {
+    out.innerHTML = renderRunResult(res) + '\n<span class="info">↩ Este envío no cuenta como intento: corrige y vuelve a enviar.</span>';
+    setBusy(false);
+    return;
+  }
+
+  var verdict = gradeOutput(q, txt);
+  var isCorrect = verdict.ok;
+  var retries = state.retryCount;
+  var maxRetries = 6; // 7 envíos totales (1 inicial + 6 reintentos)
+  var puntosBase = isCorrect ? Math.max(0.3, 1 - (retries * 0.1)) : 0;
+
+  state.respuestas[state.preguntaActual - 1] = {
+    correcta: isCorrect,
+    codigo: code,
+    salida: txt,
+    intentos: retries + 1
+  };
+
+  var salidaHtml = '<span class="ok">' + escapeHtml(txt) + '</span>\n';
+  if (isCorrect || retries >= maxRetries) {
+    state.advancing = true;
+    if (isCorrect) {
+      var pct = Math.round(puntosBase * 100);
+      out.innerHTML = salidaHtml + '<span class="ok">✅ ¡Correcto! (' + pct + '% del valor)</span>';
+    } else {
+      out.innerHTML = salidaHtml + '<span class="err">❌ Sin más reintentos (' + (maxRetries + 1) + ' envíos). Avanzando...</span>';
+    }
+    setBusy(false);
+    var current = state.preguntaActual;
+    setTimeout(function() {
+      if (!state.examActive || state.preguntaActual !== current) return;
+      if (current >= 9) finishExam();
+      else loadQuestion(current + 1);
+    }, 1500);
+  } else {
+    state.retryCount++;
+    document.getElementById('retryCount').textContent = state.retryCount;
+    var nextPct = Math.round(Math.max(0.3, 1 - (state.retryCount * 0.1)) * 100);
+    out.innerHTML = salidaHtml +
+      '<span class="err">❌ La respuesta no coincide. Intento ' + (retries + 2) + ' de ' + (maxRetries + 1) + ' (' + nextPct + '% del valor).</span>\n' +
+      '<span class="tip">💡 ' + wrongAnswerHint(q, verdict, txt, code) + '</span>';
+    setBusy(false);
+  }
+
+  // Guardar en Supabase
+  saveResponse(state.preguntaActual, isCorrect, puntosBase, retries + 1);
 }
 
 // ═══════════════════════════════════════
 // FINISH
 // ═══════════════════════════════════════
 async function finishExam() {
+  if (!state.examActive) return;
+  state.examActive = false;
   clearInterval(state.timerInterval);
   document.getElementById('timeUpOverlay').classList.remove('active');
 
@@ -774,14 +1100,14 @@ function saveLocal(estado, notaFinal) {
 // INTEGRITY
 // ═══════════════════════════════════════
 document.addEventListener('visibilitychange', function() {
-  if (document.hidden && state.preguntaActual > 0) {
+  if (document.hidden && state.examActive) {
     state.penalSalidas++;
     showIntegrityWarning('Cambiaste de pestaña o ventana. Penalización: −0.1 pts (total: −' + (state.penalSalidas * 0.1).toFixed(1) + ')');
   }
 });
 
 document.addEventListener('fullscreenchange', function() {
-  if (!document.fullscreenElement && state.preguntaActual > 0) {
+  if (!document.fullscreenElement && state.examActive) {
     state.penalSalidas++;
     showIntegrityWarning('Saliste de pantalla completa. Penalización: −0.1 pts (total: −' + (state.penalSalidas * 0.1).toFixed(1) + '). Volviendo a pantalla completa...');
     // Re-forzar fullscreen tras 1.5s
@@ -847,6 +1173,15 @@ document.getElementById('docInput').addEventListener('input', function() {
 // INIT
 // ═══════════════════════════════════════
 checkMobile();
+
+document.getElementById('codeEditor').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runCode(); }
+});
+
+// Empezar a descargar Python desde la pantalla de acceso (tarda unos segundos)
+window.addEventListener('load', function() {
+  setTimeout(function() { initPy().catch(function() {}); }, 300);
+});
 </script>
 </body>
 </html>
