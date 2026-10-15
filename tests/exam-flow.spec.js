@@ -76,7 +76,7 @@ test.describe('Flujo del parcial (interfaz)', () => {
     await type(page, 'empresa = "Otra"\nprint(empresa)');
     await run(page);
     await page.click('#btnSubmit');
-    await expect(page.locator('#outputPanel')).toContainText('Intento 2 de 7');
+    await expect(page.locator('#outputPanel')).toContainText('Envíos usados: 1 de 7. Sin descuento por reintentar.');
     await expect(page.locator('#outputPanel')).toContainText('💡');
     await expect(page.locator('#retryCount')).toHaveText('1');
   });

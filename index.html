@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PParcial 2026-2 | IUB · Fundamentos de Computación</title>
+<title>PParcial 2026-3 | IUB · Fundamentos de Computación</title>
 <style>
 :root {
   --bg: #13111c; --panel: #1a1825; --editor-bg: #0f0d18; --accent: #7c3aed;
@@ -96,7 +96,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 <!-- PANTALLA DE ACCESO -->
 <div id="accessScreen" class="access-screen">
   <div class="access-card">
-    <h1>📋 PParcial 2026-2</h1>
+    <h1>📋 PParcial 2026-3</h1>
     <p class="subtitle">Fundamentos de Computación · IUB</p>
     <p style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">RA1: Variables y Operaciones básicas en Python</p>
 
@@ -115,7 +115,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <input type="text" id="docInput" placeholder="Número de documento" autocomplete="off">
     <div id="studentPreview" style="font-size:0.72rem;color:var(--blue);margin:4px 0;min-height:20px"></div>
     <button class="btn btn-primary" id="btnStart" disabled onclick="startExam()">▶ Iniciar Parcial</button>
-    <p style="font-size:0.62rem;color:#555;margin-top:12px">⏱ 50 min · 9 preguntas · Sin retroceso · Intento único<br>🖥 Se requiere pantalla completa · Salir resta −0.1 pts<br>🔄 7 envíos por pregunta (6 reintentos, −10% c/u)<br>⏰ +5 min extra disponible (máx. 3, −0.5 pts c/u)</p>
+    <p style="font-size:0.62rem;color:#555;margin-top:12px">⏱ 50 min · 9 preguntas · Sin retroceso · Intento único (reanudable)<br>🖥 Se requiere pantalla completa · Salir resta −0.1 pts<br>🔄 7 envíos evaluables por pregunta · sin descuento por reintento<br>⚠ Errores de Python y envíos sin salida no cuentan<br>⏰ +5 min extra disponible (máx. 3, −0.5 pts c/u)</p>
   </div>
 </div>
 
@@ -153,7 +153,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   </div>
 
   <div class="bottombar">
-    <span style="color:var(--muted)" id="penalInfo">Reintentos: <span id="retryCount">0</span>/6</span>
+    <span style="color:var(--muted)" id="penalInfo">Envíos usados: <span id="retryCount">0</span>/7</span>
     <div class="actions">
       <button class="btn btn-success" id="btnRun" onclick="runCode()">▶ Ejecutar</button>
       <button class="btn btn-primary" id="btnSubmit" onclick="submitAnswer()" disabled>✓ Enviar respuesta</button>
@@ -169,12 +169,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <p style="color:var(--muted);font-size:0.8rem;margin:12px 0">¿Necesitas 5 minutos extra? Se restarán <strong>0.5 puntos</strong> de tu nota.</p>
     <p style="font-size:0.7rem;color:var(--muted)">Extensiones usadas: <span id="extUsed">0</span>/3</p>
     <button class="btn btn-orange" id="btnExtend" onclick="requestExtension()">+5 min (−0.5 pts)</button>
+    <button class="btn btn-primary" style="margin-top:8px;display:none" id="btnReviewPending" onclick="deliverPendingForReview()">Entregar guardados y adjuntar pendiente para revisión</button>
     <button class="btn btn-danger" style="margin-top:8px" onclick="finishExam()">Finalizar parcial ahora</button>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+<script src="js/exam-persistence.js"></script>
+<script src="js/python-executor.js"></script>
+<script src="js/exam-grading.js"></script>
 <script>
 // ═══════════════════════════════════════
 // STATE
@@ -191,8 +194,9 @@ var state = {
   timerInterval: null,
   respuestas: [],
   penalSalidas: 0,
-  penalReintentos: 0,
   retryCount: 0,
+  serverOffset: 0,
+  pendingAdvance: null,
   intentoId: null,
   codeExecuted: false,  // Para evitar envíos accidentales
   examActive: false,    // true solo mientras el parcial está en curso
@@ -353,6 +357,19 @@ def __pp_run(base, user, timeout=3.0):
             sys.settrace(tracer)
             try:
                 exec(code, g)
+                # Minimal structural evidence for Q8; no required variable names or formatting.
+                tree = ast.parse(src)
+                res['analysis'] = {
+                    'numericValues': [value for key, value in g.items()
+                                      if not key.startswith('_') and type(value) in (int, float)
+                                      and -1e12 < value < 1e12][:100],
+                    'arithmetic': any(
+                        isinstance(node, ast.BinOp) or
+                        (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)) or
+                        (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                         and node.func.id in ('sum', 'sub'))
+                        for node in ast.walk(tree))
+                }
             finally:
                 sys.settrace(None)
                 sys.setrecursionlimit(old_limit)
@@ -367,37 +384,27 @@ def __pp_run(base, user, timeout=3.0):
 `;
 
 function initPy() {
-  if (pyReady) return Promise.resolve(pyodide);
   if (!pyLoading) {
-    pyLoading = (async function() {
-      for (var i = 0; i < 40 && typeof loadPyodide !== 'function'; i++) {
-        await new Promise(function(r) { setTimeout(r, 250); });
-      }
-      if (typeof loadPyodide !== 'function') throw new Error('PYODIDE_SCRIPT_NO_CARGO');
-      var p = await loadPyodide({ indexURL: PYODIDE_INDEX_URL });
-      p.runPython(PY_RUNNER);
-      pyodide = p;
+    pyLoading = PPPython.init(PY_RUNNER).then(function () {
       pyReady = true;
-      return p;
-    })().catch(function(e) { pyLoading = null; throw e; });
+      return PPPython;
+    }).catch(function (e) { pyReady = false; pyLoading = null; throw e; });
   }
   return pyLoading;
 }
 
-// Ejecuta el código del estudiante para la pregunta qNum.
-// Devuelve { stdout, error, autofix }.
+// Cada ejecución está aislada en Python y el Worker puede detenerse sin bloquear la interfaz.
 async function executeStudentCode(qNum, userCode) {
   var q = questions[qNum - 1];
-  var py = await initPy();
-  var fn = py.globals.get('__pp_run');
   try {
-    return JSON.parse(fn(q.codeBase(examVars), String(userCode).replace(/\r\n?/g, '\n'), 3.0));
+    await initPy();
+    return await PPPython.run(q.codeBase(examVars), String(userCode).replace(/\r\n?/g, '\n'), PY_RUNNER);
   } catch (e) {
-    // Si Pyodide quedó en mal estado, se recarga en el próximo intento
     pyReady = false; pyLoading = null; pyodide = null;
+    if (e && e.name === '_PPTimeout') {
+      return { stdout: '', error: { type: '_PPTimeout', msg: e.message, line: null, code: '', where: 'user' }, autofix: false };
+    }
     throw e;
-  } finally {
-    try { fn.destroy(); } catch (_) {}
   }
 }
 
@@ -490,8 +497,13 @@ function renderLoadError() {
 
 function setBusy(b) {
   pyBusy = b;
-  document.getElementById('btnRun').disabled = b || state.advancing;
-  document.getElementById('btnSubmit').disabled = b || state.advancing || !state.codeExecuted;
+  var locked = b || state.advancing || state.finishing || !!state.pendingAnswer;
+  var run = document.getElementById('btnRun'), submit = document.getElementById('btnSubmit');
+  var skip = document.getElementById('btnSkip'), editor = document.getElementById('codeEditor');
+  if(run)run.disabled=locked;
+  if(submit)submit.disabled=locked || !state.codeExecuted;
+  if(skip)skip.disabled=locked;
+  if(editor)editor.readOnly=locked;
 }
 
 function nextPaint() { return new Promise(function(r) { setTimeout(r, 30); }); }
@@ -513,23 +525,8 @@ function numTokens(s) {
 }
 
 // Devuelve { ok: bool, missing: [índices de las partes esperadas que no aparecen] }
-function gradeOutput(q, txt) {
-  var parts = q.outputMatch(examVars).split('\n').filter(function(p) { return p.trim(); });
-  var normOut = normText(txt);
-  var toks = numTokens(txt);
-  var missing = [];
-  parts.forEach(function(part, i) {
-    var p = normText(part), found;
-    if (/^-?\d+(\.\d+)?$/.test(p)) {
-      var e = parseFloat(p);
-      var tol = Number.isInteger(e) ? 1e-9 : 0.051; // promedio: acepta redondeo a 1 o 2 decimales
-      found = toks.some(function(a) { return Math.abs(a - e) <= tol; });
-    } else {
-      found = normOut.indexOf(p) !== -1;
-    }
-    if (!found) missing.push(i);
-  });
-  return { ok: missing.length === 0 && txt.trim().length > 0, missing: missing, parts: parts };
+function gradeOutput(q, txt, code, analysis) {
+  return PPGrading.grade(q, txt, examVars, analysis);
 }
 
 function wrongAnswerHint(q, verdict, txt, code) {
@@ -540,6 +537,8 @@ function wrongAnswerHint(q, verdict, txt, code) {
   if (numeric && !/\d/.test(txt)) {
     return 'Tu salida no muestra ningún número. Si pusiste el nombre de la variable entre comillas (<code>"total"</code>), Python muestra la palabra, no el valor: usa <code>print(total)</code> sin comillas.';
   }
+  if (q.num === 8) return 'Revisa los tres pasos: define las dos entradas con los valores del enunciado, calcula el vuelto con ellas y muéstralo con print(). No basta con imprimir un resultado fijo.';
+  if (q.num === 2 && verdict.missing.indexOf(1) >= 0 && verdict.missing.indexOf(0) < 0) return 'La salida ya muestra la empresa; añade un mensaje descriptivo, por ejemplo print("Organización:", empresa).';
   if (q.hints) {
     for (var i = 0; i < verdict.missing.length; i++) {
       var h = q.hints[verdict.missing[i]];
@@ -598,14 +597,14 @@ var questions = [
   },
   {
     num: 2, title: 'Mostrar mensaje junto al valor de la variable',
-    enun: function(v) { return 'Usa <code>print()</code> para mostrar el mensaje <code>"Empresa: "</code> seguido del valor de la variable <code>empresa</code> (creada en la pregunta anterior).'; },
+    enun: function(v) { return 'Usa <code>print()</code> para mostrar un mensaje descriptivo junto al valor de <code>empresa</code>, disponible en el código base. Puedes escribir <em>Empresa</em>, <em>Organización</em> u otro mensaje claro; no hay una frase literal obligatoria.'; },
     vars: 'empresa (ya definida)',
     codeBase: function(v) { return 'empresa = "' + v.empresa + '"\n\n'; },
     outputMatch: function(v) { return v.empresa; },
     hints: [function(v) { return 'La salida debe incluir el valor de la variable <code>empresa</code>. Usa la variable sin comillas: <code>print("Empresa:", empresa)</code>.'; }],
     outputType: 'contains',
     ce: 'CE1, CE4', tiempo: 3,
-    hint: 'print("cualquier texto", empresa) — no importa el mensaje, solo que muestre el valor de empresa.'
+    hint: 'print("Organización:", empresa) — muestra un mensaje descriptivo y el valor de la variable, no su nombre entre comillas.'
   },
   {
     num: 3, title: 'Distinguir número de texto',
@@ -651,7 +650,7 @@ var questions = [
   },
   {
     num: 7, title: 'Máximo y mínimo (estadística)',
-    enun: function(v) { return 'Usa las funciones <code>max()</code> y <code>min()</code> con las variables <code>enero</code>, <code>febrero</code>, <code>marzo</code> para encontrar el mes con <strong>mayor</strong> y <strong>menor</strong> venta. Muestra ambos resultados.'; },
+    enun: function(v) { return 'Usa las funciones <code>max()</code> y <code>min()</code> con las variables <code>enero</code>, <code>febrero</code>, <code>marzo</code> para obtener los <strong>valores numéricos</strong> mayor y menor de ventas, no los nombres de los meses. Muestra primero el mayor y después el menor (en una o dos líneas). También puedes identificarlos con mensajes como Mayor y Menor, en cualquier orden.'; },
     vars: 'enero, febrero, marzo (ya definidas)',
     codeBase: function(v) { return 'empresa = "' + v.empresa + '"\nenero = ' + v.ventas_ene + '\nfebrero = ' + v.ventas_feb + '\nmarzo = ' + v.ventas_mar + '\n\n'; },
     outputMatch: function(v) { 
@@ -689,7 +688,7 @@ var questions = [
   },
   {
     num: 9, title: 'Pipeline completo: entrada → operación → salida',
-    enun: function(v) { return '<strong>Integrador final:</strong> Define tres variables con las ventas del segundo trimestre: <code>abril = ' + rng2(v,55,95) + '</code>, <code>mayo = ' + rng2(v,50,98) + '</code>, <code>junio = ' + rng2(v,40,90) + '</code>. Calcula el <strong>total</strong>, el <strong>promedio</strong> y muestra ambos con mensajes descriptivos. <em>Ejemplo de salida: "Total: 250 — Promedio: 83.33"</em>'; },
+    enun: function(v) { return '<strong>Integrador final:</strong> Define tres variables con las ventas del segundo trimestre: <code>abril = ' + rng2(v,55,95) + '</code>, <code>mayo = ' + rng2(v,50,98) + '</code>, <code>junio = ' + rng2(v,40,90) + '</code>. Calcula el <strong>total</strong>, el <strong>promedio</strong> y muestra ambos con mensajes descriptivos. Puedes usar mensajes como <em>Total</em>, <em>Suma</em>, <em>Ventas acumuladas</em>, <em>Promedio</em> o <em>Media mensual</em>; cada uno debe acompañar su cifra correcta. Puedes usar una o dos líneas. Se aceptan punto o coma decimal; esto solo cambia la presentación, no cómo se escriben los números en Python.'; },
     vars: 'abril, mayo, junio, total_q2, promedio_q2',
     codeBase: function(v) { 
       var abr = rng2(v,55,95), may = rng2(v,50,98), jun = rng2(v,40,90);
@@ -701,9 +700,9 @@ var questions = [
       var avg = tot / 3;
       return 'Total' + '\n' + String(tot) + '\n' + 'Promedio' + '\n' + String(Math.round(avg*100)/100);
     },
-    hints: ['Falta el mensaje descriptivo con la palabra <strong>Total</strong>, por ejemplo: <code>print("Total:", total_q2)</code>.',
+    hints: ['Identifica la cifra del total con un mensaje como <strong>Total</strong>, <strong>Suma</strong> o <strong>Ventas acumuladas</strong>, por ejemplo: <code>print("Total:", total_q2)</code>.',
             'El valor del total no aparece o no es correcto. Revisa la suma <code>abril + mayo + junio</code>.',
-            'Falta el mensaje descriptivo con la palabra <strong>Promedio</strong>, por ejemplo: <code>print("Promedio:", promedio_q2)</code>.',
+            'Identifica la cifra del promedio con un mensaje como <strong>Promedio</strong> o <strong>Media</strong>, por ejemplo: <code>print("Promedio:", promedio_q2)</code>.',
             'El valor del promedio no aparece o no es correcto. Recuerda: <code>promedio = total / 3</code>.'],
     outputType: 'contains',
     ce: 'CE1, CE2, CE4', tiempo: 5,
@@ -720,381 +719,312 @@ function rng2(v, min, max) {
 // ═══════════════════════════════════════
 // TIMER
 // ═══════════════════════════════════════
+// Reliable flow: the server confirms submissions before navigation or final results.
+Object.assign(state, {drafts:{}, outputs:{}, dirty:false, editVersion:0, serverOffset:0,
+  pendingAnswer:null, pendingExtension:null, pendingForReview:null, finishing:false, finished:false, starting:false});
+var draftTimer = null, advanceTimer = null, persistenceBusy = false;
+function captureSnapshot() {
+  return JSON.parse(JSON.stringify({preguntaActual:state.preguntaActual,retryCount:state.retryCount,
+    respuestas:state.respuestas,drafts:state.drafts,outputs:state.outputs,penalSalidas:state.penalSalidas,
+    pendingForReview:state.pendingForReview}));
+}
+function restoreSnapshot(s) {
+  state.preguntaActual = Math.min(9,Math.max(1,Number(s.preguntaActual)||1));
+  state.retryCount = Math.min(7,Math.max(0,Number(s.retryCount)||0));
+  state.respuestas = s.respuestas || [];
+  state.drafts = s.drafts || {}; state.outputs = s.outputs || {};
+  state.pendingForReview = s.pendingForReview || null;
+  state.penalSalidas = Math.max(state.penalSalidas, Number(s.penalSalidas)||0);
+}
+function recoveryCopy() {
+  if (!state.documento || state.finished) return;
+  try { ExamPersistence.journal(state.documento,{snapshot:captureSnapshot(),dirty:state.dirty,
+    pendingAnswer:state.pendingAnswer,pendingExtension:state.pendingExtension,pendingForReview:state.pendingForReview,finishing:state.finishing}); }
+  catch (_) { syncMessage('El respaldo temporal de esta pestaña no está disponible. No cierres la página mientras haya cambios pendientes.',true); }
+}
+function acceptServer(d) {
+  if (d.server_now) state.serverOffset = Date.parse(d.server_now)-Date.now();
+  if (d.deadline_at) state.deadlineAt = Date.parse(d.deadline_at);
+  if (d.extensiones_usadas != null) state.extensionesUsadas = Number(d.extensiones_usadas);
+}
+function syncMessage(message, retry) {
+  var banner=document.getElementById('saveStatus');
+  if (!banner) {
+    banner=document.createElement('div'); banner.id='saveStatus'; banner.setAttribute('role','status');
+    banner.style.cssText='position:fixed;bottom:12px;left:12px;right:12px;padding:10px 14px;background:#27213b;border:1px solid #a78bfa;border-radius:8px;color:#fff;z-index:210;font-size:0.8rem';
+    document.body.appendChild(banner);
+  }
+  banner.replaceChildren(); var text=document.createElement('span');text.textContent=message;banner.appendChild(text);
+  if(retry){var button=document.createElement('button');button.id='btnRetrySave';button.className='btn';button.style.marginLeft='12px';button.textContent=state.finishing?'Reintentar entrega':'Reintentar guardado';button.onclick=retrySave;banner.appendChild(button);}
+  banner.style.display=message?'block':'none';
+  var layout=document.getElementById('examLayout');
+  if(layout&&state.examActive)layout.style.height=message?'calc(100vh - '+(banner.offsetHeight+24)+'px)':'100vh';
+}
+function pendingMessage(e) {
+  var msg=String(e&&e.message||'');
+  if(msg.indexOf('TIME_EXPIRED')>=0){showTimeUp();return 'El tiempo terminó antes de confirmar este envío. Tu código está conservado; solicita una extensión para reintentarlo.';}
+  if(msg.indexOf('REVISION_CONFLICT')>=0)return 'Hay otra operación o pestaña con una versión diferente. Conservamos tu trabajo; reintenta el guardado desde esta pestaña.';
+  return 'Guardado pendiente: el servidor no confirmó la operación. Tu trabajo se conserva en esta pestaña; no está entregado todavía.';
+}
+function changed() {state.dirty=true;state.editVersion++;recoveryCopy();}
 function startTimer() {
-  updateTimerDisplay();
-  state.timerInterval = setInterval(function() {
-    state.tiempoRestante--;
-    updateTimerDisplay();
-    if (state.tiempoRestante <= 0) {
-      clearInterval(state.timerInterval);
-      showTimeUp();
-    }
-  }, 1000);
-}
-
-function updateTimerDisplay() {
-  var m = Math.floor(state.tiempoRestante / 60);
-  var s = state.tiempoRestante % 60;
-  var el = document.getElementById('timerDisplay');
-  el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
-  el.className = 'timer';
-  if (state.tiempoRestante < 300) el.className = 'timer danger';
-  else if (state.tiempoRestante < 600) el.className = 'timer warning';
-}
-
-function showTimeUp() {
-  document.getElementById('extUsed').textContent = state.extensionesUsadas;
-  document.getElementById('timeUpOverlay').classList.add('active');
-  document.getElementById('btnExtend').style.display = state.extensionesUsadas >= 3 ? 'none' : '';
-}
-
-function requestExtension() {
-  if (state.extensionesUsadas >= 3) return;
-  state.extensionesUsadas++;
-  state.tiempoRestante = 5 * 60;
-  state.penalReintentos += 0.5; // Penalización por tiempo extra
-  document.getElementById('timeUpOverlay').classList.remove('active');
-  document.getElementById('extUsed').textContent = state.extensionesUsadas;
-  startTimer();
-}
-
-// ═══════════════════════════════════════
-// EXAM FLOW
-// ═══════════════════════════════════════
-function startExam() {
-  var doc = document.getElementById('docInput').value.trim();
-  if (!doc) return;
-
-  // Forzar pantalla completa
-  var el = document.documentElement;
-  if (el.requestFullscreen) {
-    el.requestFullscreen().catch(function() {
-      console.log('Fullscreen no disponible — continuando en ventana normal');
-    });
-  }
-
-  state.documento = doc;
-  state.examActive = true;
-  state.penalSalidas = 0; // las salidas antes de iniciar no cuentan
-  state.nombre = document.getElementById('studentPreview').textContent || 'Estudiante';
-  examVars = generateExamVars(doc);
-
-  document.getElementById('accessScreen').style.display = 'none';
-  document.getElementById('examLayout').classList.add('active');
-  document.getElementById('studentName').textContent = state.nombre;
-
-  renderProgressDots();
-  loadQuestion(1);
-  startTimer();
-
-  // Guardar intento en Supabase
-  saveAttempt('en_progreso');
-
-  // Precargar Python mientras el estudiante lee la primera pregunta
-  initPy().catch(function(e) { console.log('Precarga de Python falló:', e && e.message); });
-}
-
-function loadQuestion(num) {
-  state.preguntaActual = num;
-  state.retryCount = 0;
-  var q = questions[num - 1];
-
-  document.getElementById('qNum').textContent = num;
-  document.getElementById('preguntaBadge').textContent = 'Pregunta ' + num + ' · ' + q.ce;
-  document.getElementById('preguntaTitle').textContent = 'Q' + num + ': ' + q.title;
-  document.getElementById('preguntaEnun').innerHTML = q.enun(examVars);
-  document.getElementById('codeBase').textContent = q.codeBase(examVars);
-  document.getElementById('codeEditor').value = '';
-  document.getElementById('varsSugeridas').textContent = 'Variables: ' + q.vars;
-  document.getElementById('tiempoPrudente').textContent = '⏱ Tiempo sugerido: ' + q.tiempo + ' min';
-  document.getElementById('outputPanel').innerHTML = '<span class="info">▶ Haz clic en Ejecutar para probar tu código</span>';
-  document.getElementById('retryCount').textContent = '0';
-  state.codeExecuted = false;
-  state.advancing = false;
-  setBusy(false);
-  resetSkipButton();
-
-  // Actualizar panel de contexto con respuestas anteriores
-  updateContextPanel();
-  renderProgressDots();
-
-  // Scroll instrucciones al inicio
-  document.getElementById('instrPanel').scrollTop = 0;
-}
-
-function updateContextPanel() {
-  var html = '<strong>📋 Respuestas correctas:</strong><br>';
-  var has = false;
-  for (var i = 0; i < state.respuestas.length; i++) {
-    if (state.respuestas[i].correcta) {
-      has = true;
-      html += 'Q' + (i+1) + ': ✅ ' + escapeHtml(state.respuestas[i].salida).substring(0,40) + '<br>';
-    }
-  }
-  if (!has) html += '<em>Aún no hay respuestas correctas</em>';
-  document.getElementById('panelContexto').innerHTML = html;
-}
-
-// ═══════════════════════════════════════
-// SALTAR PREGUNTA
-// ═══════════════════════════════════════
-var skipTimer = null;
-function resetSkipButton() {
-  var b = document.getElementById('btnSkip');
-  if (skipTimer) { clearTimeout(skipTimer); skipTimer = null; }
-  if (b) { b.dataset.confirm = ''; b.textContent = 'Saltar →'; b.style.background = '#555'; }
-}
-
-function skipQuestion() {
-  if (!state.examActive || state.advancing || pyBusy) return;
-  // Confirmación con doble clic (sin confirm(), que puede sacar de pantalla completa y penalizar)
-  var b = document.getElementById('btnSkip');
-  if (b.dataset.confirm !== '1') {
-    b.dataset.confirm = '1';
-    b.textContent = '¿Seguro? 0 pts · clic otra vez';
-    b.style.background = 'var(--red)';
-    skipTimer = setTimeout(resetSkipButton, 4000);
-    return;
-  }
-  resetSkipButton();
-
-  state.respuestas[state.preguntaActual - 1] = {
-    correcta: false,
-    codigo: '',
-    salida: '(pregunta saltada)',
-    intentos: 0
-  };
-
-  if (state.preguntaActual >= 9) {
-    finishExam();
-  } else {
-    loadQuestion(state.preguntaActual + 1);
-  }
-}
-
-function renderProgressDots() {
-  var html = '';
-  for (var i = 0; i < 9; i++) {
-    var cls = 'dot';
-    var resp = state.respuestas[i];
-    if (resp && resp.correcta) cls += ' done';
-    else if (i + 1 === state.preguntaActual) cls += ' current';
-    html += '<div class="' + cls + '"></div>';
-  }
-  document.getElementById('progressDots').innerHTML = html;
-}
-
-// ═══════════════════════════════════════
-// CODE EXECUTION
-// ═══════════════════════════════════════
-async function runCode() {
-  if (pyBusy || state.advancing || !state.examActive) return;
-  var out = document.getElementById('outputPanel');
-  var code = document.getElementById('codeEditor').value;
-  if (!code.trim()) {
-    out.innerHTML = '<span class="info">Escribe tu código en el editor y luego pulsa ▶ Ejecutar.</span>';
-    return;
-  }
-  setBusy(true);
-  out.innerHTML = '<span class="info">' + (pyReady ? 'Ejecutando...' : 'Cargando Python (solo la primera vez, puede tardar unos segundos)...') + '</span>';
-  await nextPaint();
-  try {
-    var res = await executeStudentCode(state.preguntaActual, code);
-    out.innerHTML = renderRunResult(res);
-    state.codeExecuted = true;
-  } catch (e) {
-    console.log('runCode error:', e && e.message);
-    out.innerHTML = renderLoadError();
-  } finally {
-    setBusy(false);
-  }
-}
-
-function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-// ═══════════════════════════════════════
-// SUBMIT
-// ═══════════════════════════════════════
-async function submitAnswer() {
-  if (pyBusy || state.advancing || !state.examActive) return;
-  var q = questions[state.preguntaActual - 1];
-  var out = document.getElementById('outputPanel');
-  var code = document.getElementById('codeEditor').value;
-  if (!code.trim()) {
-    out.innerHTML = '<span class="info">El editor está vacío. Escribe tu código antes de enviar (este envío no cuenta).</span>';
-    return;
-  }
-  setBusy(true);
-  out.innerHTML = '<span class="info">Revisando tu respuesta...</span>';
-  await nextPaint();
-
-  var res;
-  try {
-    res = await executeStudentCode(state.preguntaActual, code);
-  } catch (e) {
-    console.log('submitAnswer error:', e && e.message);
-    out.innerHTML = renderLoadError();
-    setBusy(false);
-    return;
-  }
-
-  // Errores de programación o salida vacía: se explica y NO cuenta como intento
-  var txt = (res.stdout || '').trim();
-  if (res.error || !txt) {
-    out.innerHTML = renderRunResult(res) + '\n<span class="info">↩ Este envío no cuenta como intento: corrige y vuelve a enviar.</span>';
-    setBusy(false);
-    return;
-  }
-
-  var verdict = gradeOutput(q, txt);
-  var isCorrect = verdict.ok;
-  var retries = state.retryCount;
-  var maxRetries = 6; // 7 envíos totales (1 inicial + 6 reintentos)
-  var puntosBase = isCorrect ? Math.max(0.3, 1 - (retries * 0.1)) : 0;
-
-  state.respuestas[state.preguntaActual - 1] = {
-    correcta: isCorrect,
-    codigo: code,
-    salida: txt,
-    intentos: retries + 1
-  };
-
-  var salidaHtml = '<span class="ok">' + escapeHtml(txt) + '</span>\n';
-  if (isCorrect || retries >= maxRetries) {
-    state.advancing = true;
-    if (isCorrect) {
-      var pct = Math.round(puntosBase * 100);
-      out.innerHTML = salidaHtml + '<span class="ok">✅ ¡Correcto! (' + pct + '% del valor)</span>';
-    } else {
-      out.innerHTML = salidaHtml + '<span class="err">❌ Sin más reintentos (' + (maxRetries + 1) + ' envíos). Avanzando...</span>';
-    }
-    setBusy(false);
-    var current = state.preguntaActual;
-    setTimeout(function() {
-      if (!state.examActive || state.preguntaActual !== current) return;
-      if (current >= 9) finishExam();
-      else loadQuestion(current + 1);
-    }, 1500);
-  } else {
-    state.retryCount++;
-    document.getElementById('retryCount').textContent = state.retryCount;
-    var nextPct = Math.round(Math.max(0.3, 1 - (state.retryCount * 0.1)) * 100);
-    out.innerHTML = salidaHtml +
-      '<span class="err">❌ La respuesta no coincide. Intento ' + (retries + 2) + ' de ' + (maxRetries + 1) + ' (' + nextPct + '% del valor).</span>\n' +
-      '<span class="tip">💡 ' + wrongAnswerHint(q, verdict, txt, code) + '</span>';
-    setBusy(false);
-  }
-
-  // Guardar en Supabase
-  saveResponse(state.preguntaActual, isCorrect, puntosBase, retries + 1);
-}
-
-// ═══════════════════════════════════════
-// FINISH
-// ═══════════════════════════════════════
-async function finishExam() {
-  if (!state.examActive) return;
-  state.examActive = false;
   clearInterval(state.timerInterval);
-  document.getElementById('timeUpOverlay').classList.remove('active');
-
-  var correctas = state.respuestas.filter(function(r) { return r && r.correcta; }).length;
-  var notaBase = 5.0 * (correctas / 9);
-  var penalTotal = state.penalSalidas * 0.1 + state.extensionesUsadas * 0.5;
-  var notaFinal = Math.max(0, Math.round((notaBase - penalTotal) * 10) / 10);
-
-  // Guardar en Supabase y esperar confirmación antes de mostrar resultados
-  await saveAttempt('finalizado', notaFinal);
-
-  // Mostrar feedback
-  var layout = document.getElementById('examLayout');
-  layout.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px"><div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:500px;text-align:center">' +
-    '<h2 style="color:var(--accent);margin-bottom:16px">📋 Parcial Finalizado</h2>' +
-    '<table style="width:100%;font-size:0.8rem;text-align:left;border-collapse:collapse">' +
-    '<tr><td style="padding:6px">✅ Correctas:</td><td style="padding:6px;font-weight:700">' + correctas + '/9</td></tr>' +
-    '<tr><td style="padding:6px">📐 Nota base:</td><td style="padding:6px">' + notaBase.toFixed(1) + '</td></tr>' +
-    '<tr><td style="padding:6px">🚪 Salidas de pantalla:</td><td style="padding:6px;color:var(--red)">−' + (state.penalSalidas*0.1).toFixed(1) + ' (' + state.penalSalidas + ' eventos × −0.1)</td></tr>' +
-    '<tr><td style="padding:6px">⏰ Tiempo extra:</td><td style="padding:6px;color:var(--red)">−' + (state.extensionesUsadas*0.5).toFixed(1) + '</td></tr>' +
-    '<tr style="border-top:2px solid var(--accent)"><td style="padding:6px;font-weight:700;font-size:1rem">🎯 NOTA FINAL:</td><td style="padding:6px;font-weight:700;font-size:1.2rem;color:var(--accent)">' + notaFinal.toFixed(1) + ' / 5.0</td></tr>' +
-    '</table>' +
-    '<p style="font-size:0.72rem;color:var(--muted);margin-top:16px">📊 Este parcial equivale al <strong>60%</strong> de tu nota del módulo.<br>📝 El <strong>40%</strong> restante corresponde a la nota formativa.<br>⚠ Máx. inasistencia: <strong>10.4 horas</strong> (20% de 52h).</p>' +
-    '<p style="font-size:0.65rem;color:#555">' + state.nombre + ' · Documento: ' + state.documento + '</p>' +
-    '</div></div>';
+  function tick(){
+    state.tiempoRestante=Math.max(0,Math.ceil((state.deadlineAt-(Date.now()+state.serverOffset))/1000));
+    updateTimerDisplay();
+    if(state.tiempoRestante<=0){clearInterval(state.timerInterval);if(!state.finishing)showTimeUp();}
+  }
+  tick(); if(state.tiempoRestante>0)state.timerInterval=setInterval(tick,1000);
 }
-
-// ═══════════════════════════════════════
-// SUPABASE PERSISTENCE
-// ═══════════════════════════════════════
-function saveAttempt(estado, notaFinal) {
-  return new Promise(function(resolve) {
-    try {
-      var client = getSupabase();
-      if (!client) { 
-        console.log('⚠ Supabase no disponible, guardando en localStorage'); 
-        saveLocal(estado, notaFinal); 
-        return resolve(); 
-      }
-
-      console.log('💾 Guardando intento en Supabase:', estado, state.documento);
-      client.from('pparcial_intentos').upsert({
-        documento: state.documento,
-        nombre: state.nombre,
-        estado: estado,
-        pregunta_actual: state.preguntaActual,
-        tiempo_restante: state.tiempoRestante,
-        extensiones_usadas: state.extensionesUsadas,
-        penal_salidas: state.penalSalidas,
-        nota_final: notaFinal || null,
-        finalizado_en: estado === 'finalizado' ? new Date().toISOString() : null
-      }, { onConflict: 'documento' }).then(function(r) {
-        if (r.error) {
-          console.log('❌ Supabase error:', r.error.message, r.error);
-        } else {
-          console.log('✅ Intento guardado en Supabase');
-          state.intentoId = r.data ? r.data[0].id : null;
-        }
-        resolve();
-      }).catch(function(e) {
-        console.log('❌ Supabase exception:', e.message);
-        resolve();
-      });
-    } catch(e) { 
-      console.log('saveAttempt error:', e.message); 
-      saveLocal(estado, notaFinal); 
-      resolve(); 
+function updateTimerDisplay() {
+  var m=Math.floor(state.tiempoRestante/60),s=state.tiempoRestante%60,el=document.getElementById('timerDisplay');
+  el.textContent=m+':'+(s<10?'0':'')+s;el.className='timer'+(state.tiempoRestante<300?' danger':state.tiempoRestante<600?' warning':'');
+}
+function showTimeUp() {
+  if(!state.examActive || state.finished)return;
+  document.getElementById('extUsed').textContent=state.extensionesUsadas;
+  document.getElementById('btnExtend').style.display=state.extensionesUsadas>=3?'none':'';
+  var review=document.getElementById('btnReviewPending');
+  review.style.display=(state.extensionesUsadas>=3&&state.pendingAnswer&&state.tiempoRestante<=0)?'inline-block':'none';
+  document.getElementById('timeUpOverlay').classList.add('active');
+}
+async function requestExtension() {
+  if(persistenceBusy||state.extensionesUsadas>=3||!state.examActive)return;
+  persistenceBusy=true;
+  state.pendingExtension=state.pendingExtension||crypto.randomUUID();recoveryCopy();
+  try{
+    var d=await ExamPersistence.extension({documento:state.documento,eventId:state.pendingExtension});
+    acceptServer(d);state.pendingExtension=null;recoveryCopy();
+    document.getElementById('timeUpOverlay').classList.remove('active');
+    document.getElementById('extUsed').textContent=state.extensionesUsadas;
+    startTimer();syncMessage('',false);
+  }catch(e){syncMessage(pendingMessage(e),true);}finally{persistenceBusy=false;}
+}
+async function startExam() {
+  var doc=document.getElementById('docInput').value.trim();
+  if(!doc||state.starting||state.examActive)return;
+  state.starting=true;document.getElementById('btnStart').disabled=true;
+  // Fullscreen requires the initial user gesture. A failed browser request is not a programming error.
+  if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(function(){});
+  try{
+    var session=await ExamPersistence.begin(doc,state.nombre);
+    state.documento=doc;state.nombre=session.nombre||state.nombre||'Estudiante';
+    state.penalSalidas=0;acceptServer(session);examVars=generateExamVars(doc);
+    restoreSnapshot(session.snapshot||{});
+    if(session.estado==='finalizado'){showCompleted(session);return;}
+    var recovery=ExamPersistence.journal(doc);
+    if(recovery&&(recovery.dirty||recovery.pendingAnswer||recovery.pendingForReview||recovery.finishing||recovery.pendingExtension)){
+      restoreSnapshot(recovery.snapshot||{});state.pendingAnswer=recovery.pendingAnswer||null;
+      state.pendingExtension=null;state.pendingForReview=recovery.pendingForReview||state.pendingForReview||null;state.finishing=!!recovery.finishing;state.dirty=!!recovery.dirty;
     }
-  });
+    state.examActive=true;
+    document.getElementById('accessScreen').style.display='none';
+    document.getElementById('examLayout').classList.add('active');
+    document.getElementById('studentName').textContent=state.nombre;
+    loadQuestion(state.preguntaActual,true);startTimer();
+    if(state.pendingAnswer||state.finishing||state.dirty||state.pendingExtension){syncMessage('Recuperamos tu trabajo. Estamos comprobando el guardado pendiente.',true);retrySave();}
+    initPy().catch(function(){});
+  }catch(e){
+    state.examActive=false;
+    document.getElementById('studentPreview').textContent=String(e.message).indexOf('SESSION_IN_USE')>=0?
+      'Este documento ya tiene una sesión en otra pestaña o dispositivo. Regresa a la pestaña original o avisa al docente.':
+      'No se pudo abrir una sesión segura. Revisa tu conexión y vuelve a intentar.';
+  }finally{state.starting=false;if(!state.examActive)document.getElementById('btnStart').disabled=false;}
 }
-
-function saveResponse(num, correcta, puntos, intentos) {
-  try {
-    var client = getSupabase();
-    if (!client) return;
-    client.from('pparcial_respuestas').insert({
-      documento: state.documento,
-      pregunta_num: num,
-      correcta: correcta,
-      puntos: puntos,
-      intentos: intentos,
-      codigo: state.respuestas[num-1] ? state.respuestas[num-1].codigo : ''
-    }).then(function(r) {
-      if (r.error) console.log('saveResponse error:', r.error.message);
-    });
-  } catch(e) { console.log('saveResponse error:', e.message); }
+function loadQuestion(num, restoring) {
+  state.preguntaActual=num;
+  if(!restoring)state.retryCount=0;
+  var q=questions[num-1];
+  document.getElementById('qNum').textContent=num;
+  document.getElementById('preguntaBadge').textContent='Pregunta '+num+' · '+q.ce;
+  document.getElementById('preguntaTitle').textContent='Q'+num+': '+q.title;
+  document.getElementById('preguntaEnun').innerHTML=q.enun(examVars);
+  document.getElementById('codeBase').textContent=q.codeBase(examVars);
+  document.getElementById('codeEditor').value=state.drafts[num]||'';
+  document.getElementById('varsSugeridas').textContent='Variables: '+q.vars;
+  document.getElementById('tiempoPrudente').textContent='⏱ Tiempo sugerido: '+q.tiempo+' min';
+  if(state.outputs[num])document.getElementById('outputPanel').textContent=state.outputs[num];
+  else document.getElementById('outputPanel').innerHTML='<span class="info">▶ Haz clic en Ejecutar para probar tu código</span>';
+  document.getElementById('retryCount').textContent=state.retryCount;
+  state.codeExecuted=false;state.advancing=!!(state.pendingAnswer||state.finishing);
+  setBusy(false);resetSkipButton();updateContextPanel();renderProgressDots();
+  document.getElementById('instrPanel').scrollTop=0;
 }
-
-function saveLocal(estado, notaFinal) {
-  var data = {
-    documento: state.documento,
-    nombre: state.nombre,
-    estado: estado,
-    respuestas: state.respuestas,
-    nota: notaFinal,
-    ts: new Date().toISOString()
-  };
-  var key = 'pparcial_' + state.documento;
-  localStorage.setItem(key, JSON.stringify(data));
+function updateContextPanel(){
+  var html='<strong>📋 Respuestas correctas:</strong><br>',has=false;
+  state.respuestas.forEach(function(r,i){if(r&&r.correcta){has=true;html+='Q'+(i+1)+': ✅ '+escapeHtml(r.salida||'').substring(0,40)+'<br>';}});
+  document.getElementById('panelContexto').innerHTML=html+(has?'':'<em>Aún no hay respuestas correctas</em>');
 }
+function renderProgressDots(){
+  var html='';for(var i=0;i<9;i++){var r=state.respuestas[i];html+='<div class="dot'+(r&&r.correcta?' done':i+1===state.preguntaActual?' current':'')+'"></div>';}
+  document.getElementById('progressDots').innerHTML=html;
+}
+var skipTimer=null;
+function resetSkipButton(){var b=document.getElementById('btnSkip');clearTimeout(skipTimer);if(b){b.dataset.confirm='';b.textContent='Saltar →';b.style.background='#555';}}
+async function skipQuestion(){
+  if(!state.examActive||state.advancing||pyBusy||persistenceBusy||state.finishing)return;
+  var b=document.getElementById('btnSkip');
+  if(b.dataset.confirm!=='1'){b.dataset.confirm='1';b.textContent='¿Seguro? 0 pts · clic otra vez';b.style.background='var(--red)';skipTimer=setTimeout(resetSkipButton,4000);return;}
+  resetSkipButton();
+  await stageAnswer({correcta:false,codigo:document.getElementById('codeEditor').value,salida:'(pregunta saltada)',intentos:0},null);
+}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function runCode(){
+  if(pyBusy||state.advancing||state.finishing||!state.examActive)return;
+  var out=document.getElementById('outputPanel'),code=document.getElementById('codeEditor').value;
+  if(!code.trim()){out.textContent='Escribe tu código antes de ejecutar.';return;}
+  setBusy(true);out.textContent=pyReady?'Ejecutando...':'Cargando Python. La primera descarga puede tardar unos segundos...';await nextPaint();
+  try{var res=await executeStudentCode(state.preguntaActual,code);out.innerHTML=renderRunResult(res);state.codeExecuted=true;}
+  catch(e){out.innerHTML=renderLoadError();}
+  finally{state.outputs[state.preguntaActual]=out.textContent;changed();setBusy(false);scheduleDraft();}
+}
+async function submitAnswer(){
+  if(pyBusy||state.advancing||state.finishing||!state.examActive||persistenceBusy)return;
+  var q=questions[state.preguntaActual-1],out=document.getElementById('outputPanel'),code=document.getElementById('codeEditor').value;
+  if(!code.trim()){out.textContent='El editor está vacío. Escribe tu código antes de enviar (este envío no cuenta).';return;}
+  setBusy(true);out.textContent='Revisando tu respuesta...';await nextPaint();
+  try{
+    var res=await executeStudentCode(state.preguntaActual,code),txt=(res.stdout||'').trim();
+    if(res.error||!txt){out.innerHTML=renderRunResult(res)+'\n<span class="info">↩ Este envío no cuenta como intento: corrige y vuelve a enviar.</span>';state.outputs[state.preguntaActual]=out.textContent;changed();scheduleDraft();return;}
+    var verdict=gradeOutput(q,txt,code,res.analysis);
+    var r={correcta:verdict.ok,codigo:code,salida:txt,intentos:state.retryCount+1};
+    await stageAnswer(r,verdict);
+  }catch(e){out.innerHTML=renderLoadError();}
+  finally{setBusy(false);}
+}
+async function stageAnswer(response,verdict){
+  clearTimeout(draftTimer);
+  var num=state.preguntaActual,settled=response.correcta||response.intentos===7||response.intentos===0;
+  state.drafts[num]=response.codigo;state.respuestas[num-1]=response;
+  var msg=response.correcta?'✅ ¡Correcto! (100% del valor)':response.intentos===0?'Pregunta saltada.':settled?'❌ Se completaron los 7 envíos. Continuamos con la siguiente pregunta.':
+    '❌ La respuesta no coincide. Envíos usados: '+response.intentos+' de 7. Sin descuento por reintentar.\n💡 '+wrongAnswerHint(questions[num-1],verdict,response.salida,response.codigo).replace(/<[^>]*>/g,'');
+  state.outputs[num]=response.salida+'\n'+msg;
+  var next=captureSnapshot();
+  if(settled){next.preguntaActual=Math.min(9,num+1);next.retryCount=0;}else next.retryCount=response.intentos;
+  state.pendingAnswer={eventId:crypto.randomUUID(),preguntaNum:num,correcta:response.correcta,intentos:response.intentos,codigo:response.codigo,snapshot:next,settled:settled,last:settled&&num===9,message:msg};
+  state.advancing=true;changed();
+  await persistPendingAnswer();
+}
+async function persistPendingAnswer(){
+  if(!state.pendingAnswer||persistenceBusy)return;
+  persistenceBusy=true;var pending=state.pendingAnswer;
+  syncMessage('Confirmando el envío con el servidor...',false);
+  try{
+    var d=await ExamPersistence.answer(Object.assign({documento:state.documento},pending));acceptServer(d);
+    state.pendingAnswer=null;state.dirty=false;
+    restoreSnapshot(pending.snapshot);state.finishing=!!pending.last;recoveryCopy();
+    syncMessage('',false);
+    var out=document.getElementById('outputPanel');out.textContent=(state.respuestas[pending.preguntaNum-1].salida||'')+'\n'+pending.message;
+    if(pending.settled){
+      state.advancing=true;
+      clearTimeout(advanceTimer);advanceTimer=setTimeout(function(){
+        if(!state.examActive)return;
+        if(pending.last)finishExam();else loadQuestion(state.preguntaActual,true);
+      },1000);
+    }else{state.advancing=false;document.getElementById('retryCount').textContent=state.retryCount;}
+  }catch(e){syncMessage(pendingMessage(e),true);recoveryCopy();}
+  finally{persistenceBusy=false;setBusy(false);}
+}
+function scheduleDraft(){
+  clearTimeout(draftTimer);
+  if(!state.examActive||state.pendingAnswer||state.finishing)return;
+  draftTimer=setTimeout(function(){saveAttempt('en_progreso').catch(function(e){syncMessage(pendingMessage(e),true);});},250);
+}
+async function saveAttempt(status){
+  if(status==='finalizado')return ExamPersistence.finalize({documento:state.documento});
+  if(state.pendingAnswer||state.finishing||!state.examActive)return;
+  var version=state.editVersion,snapshot=captureSnapshot();
+  var d;
+  try{d=await ExamPersistence.snapshot({documento:state.documento,snapshot:snapshot});}
+  catch(e){
+    // A checkpoint may have committed before its ACK was lost; never overwrite a different version.
+    if(String(e.message).indexOf('REVISION_CONFLICT')<0)throw e;
+    var remote=await ExamPersistence.begin(state.documento,state.nombre);acceptServer(remote);
+    if(JSON.stringify(remote.snapshot)!==JSON.stringify(snapshot))throw e;
+    d=remote;
+  }
+  acceptServer(d);
+  if(version===state.editVersion){state.dirty=false;recoveryCopy();if(!state.pendingAnswer&&!state.finishing)syncMessage('',false);}
+  return d;
+}
+async function retrySave(){
+  if(persistenceBusy||state.finished)return;
+  if(state.pendingExtension){await requestExtension();if(state.pendingExtension)return;}
+  if(state.pendingAnswer){await persistPendingAnswer();return;}
+  if(state.finishing&&state.pendingForReview){await deliverPendingForReview();return;}
+  if(state.finishing){await finishExam();return;}
+  try{await saveAttempt('en_progreso');}catch(e){syncMessage(pendingMessage(e),true);}
+}
+async function finishExam(){
+  if(!state.examActive||state.finished||persistenceBusy)return;
+  clearTimeout(draftTimer);clearTimeout(advanceTimer);
+  if(state.pendingAnswer){syncMessage('Hay un envío pendiente de confirmación. Reintenta el guardado antes de terminar.',true);return;}
+  state.finishing=true;state.advancing=true;recoveryCopy();persistenceBusy=true;setBusy(false);
+  document.getElementById('timeUpOverlay').classList.remove('active');syncMessage('Confirmando la entrega final...',false);
+  try{
+    // Send the current snapshot even for early/time-expired finishes, then finalize in the same serialized queue.
+    var d=await ExamPersistence.snapshot({documento:state.documento,snapshot:captureSnapshot()});acceptServer(d);
+    var result=await ExamPersistence.finalize({documento:state.documento});showCompleted(result);
+  }catch(e){
+    // If finalization committed but its ACK was lost, begin returns the immutable result.
+    try{var remote=await ExamPersistence.begin(state.documento,state.nombre);acceptServer(remote);if(remote.estado==='finalizado'){showCompleted(remote);return;}}
+    catch(_){}
+    syncMessage(pendingMessage(e),true);recoveryCopy();
+  }finally{persistenceBusy=false;}
+}
+async function deliverPendingForReview(){
+  var pending=state.pendingAnswer||state.pendingForReview;
+  if(!pending||state.extensionesUsadas<3||state.tiempoRestante>0||persistenceBusy)return;
+  clearTimeout(draftTimer);clearTimeout(advanceTimer);state.finishing=true;state.advancing=true;
+  state.pendingForReview=JSON.parse(JSON.stringify(pending));recoveryCopy();
+  persistenceBusy=true;setBusy(false);syncMessage('Confirmando la entrega y adjuntando el envío pendiente para revisión...',false);
+  try{
+    // begin is authoritative: it refreshes the revision and keeps only ACKed answers for grading.
+    var remote=await ExamPersistence.begin(state.documento,state.nombre);acceptServer(remote);
+    if(remote.estado==='finalizado'){showCompleted(remote);return;}
+    var isUnconfirmed=true;
+    try{
+      // Retrying the original UUID can only confirm its previous ACK or fail as expired.
+      await ExamPersistence.answer(Object.assign({documento:state.documento},pending));
+      remote=await ExamPersistence.begin(state.documento,state.nombre);acceptServer(remote);
+      isUnconfirmed=false;
+    }catch(error){if(String(error.message).indexOf('TIME_EXPIRED')<0)throw error;}
+    var acked=JSON.parse(JSON.stringify(remote.snapshot||{}));
+    if(isUnconfirmed)acked.pendingForReview=JSON.parse(JSON.stringify(state.pendingForReview));
+    else{delete acked.pendingForReview;state.pendingForReview=null;}
+    state.respuestas=acked.respuestas||[];state.pendingAnswer=null;
+    await ExamPersistence.snapshot({documento:state.documento,snapshot:acked});
+    var result=await ExamPersistence.finalize({documento:state.documento});showCompleted(result);
+  }catch(e){
+    try{var confirmed=await ExamPersistence.begin(state.documento,state.nombre);if(confirmed.estado==='finalizado'){showCompleted(confirmed);return;}}catch(_){}
+    syncMessage(pendingMessage(e),true);recoveryCopy();
+  }
+  finally{persistenceBusy=false;}
+}
+function showCompleted(result){
+  state.finished=true;state.examActive=false;state.finishing=false;state.pendingAnswer=null;
+  clearInterval(state.timerInterval);clearTimeout(draftTimer);clearTimeout(advanceTimer);
+  ExamPersistence.journal(state.documento,null);syncMessage('',false);
+  document.getElementById('accessScreen').style.display='none';document.getElementById('timeUpOverlay').classList.remove('active');
+  var responses=result.snapshot&&result.snapshot.respuestas||state.respuestas;
+  var pending=result.snapshot&&result.snapshot.pendingForReview;
+  var correct=responses.filter(function(r){return r&&r.correcta;}).length;
+  var layout=document.getElementById('examLayout');layout.classList.add('active');layout.style.display='block';layout.style.height='100vh';
+  layout.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px"><div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:520px;text-align:center">'+
+    '<h2>📋 Parcial Finalizado</h2><p style="color:var(--green);margin:16px 0">✅ Entrega confirmada por el servidor</p>'+
+    '<p>Correctas: '+correct+'/9</p>'+(pending?'<p style="color:var(--orange);font-size:0.85rem">El envío pendiente quedó adjunto para revisión técnica; no se agregó automáticamente a la calificación.</p>':'')+'<p style="font-size:1.5rem;margin:18px 0">NOTA FINAL: <strong>'+result.nota_final.toFixed(1)+' / 5.0</strong></p>'+
+    '<p style="font-size:0.8rem">Sin descuento por reintentos.<br>Salidas de pantalla: '+state.penalSalidas+' (−'+(state.penalSalidas*0.1).toFixed(1)+').<br>Extensiones: '+state.extensionesUsadas+' (−'+(state.extensionesUsadas*0.5).toFixed(1)+').</p>'+
+    '<p style="font-size:0.75rem;margin-top:16px">'+escapeHtml(state.nombre)+' · Documento: '+escapeHtml(state.documento)+'</p></div></div>';
+}
+document.getElementById('codeEditor').addEventListener('input',function(){
+  if(!state.examActive||state.finishing||state.pendingAnswer)return;
+  state.drafts[state.preguntaActual]=this.value;changed();scheduleDraft();
+});
+window.addEventListener('online',retrySave);
+window.addEventListener('beforeunload',function(e){
+  if(state.examActive&&(state.dirty||state.pendingAnswer||state.finishing)){recoveryCopy();e.preventDefault();e.returnValue='';}
+});
+setInterval(function(){if(state.examActive&&!persistenceBusy&&(state.dirty||state.pendingAnswer||state.finishing||state.pendingExtension))retrySave();},10000);
 
 // ═══════════════════════════════════════
 // INTEGRITY
@@ -1145,28 +1075,19 @@ function checkMobile() {
 // DOCUMENT INPUT AUTOCOMPLETE
 // ═══════════════════════════════════════
 document.getElementById('docInput').addEventListener('input', function() {
-  var doc = this.value.trim();
-  if (doc.length >= 5) {
-    var client = getSupabase();
-    if (client) {
-      client.from('pparcial_estudiantes').select('*').eq('documento', doc).maybeSingle().then(function(r) {
-        if (r.data) {
-          state.nombre = r.data.nombre;
-          state.grupo = r.data.grupo;
-          state.horario = r.data.horario;
-          document.getElementById('studentPreview').textContent = r.data.nombre + ' · ' + r.data.grupo;
-          document.getElementById('btnStart').disabled = false;
-        } else {
-          document.getElementById('studentPreview').textContent = 'Documento no encontrado';
-          document.getElementById('btnStart').disabled = true;
-        }
-      });
-    } else {
-      // Sin Supabase: permitir con cualquier documento >=5 chars
-      document.getElementById('studentPreview').textContent = 'Estudiante (modo local)';
-      document.getElementById('btnStart').disabled = false;
-    }
-  }
+  var doc=this.value.trim(), preview=document.getElementById('studentPreview'), button=document.getElementById('btnStart');
+  button.disabled=true;state.nombre='';
+  if(doc.length<5){preview.textContent='';return;}
+  var client=getSupabase();
+  if(!client){preview.textContent='Servicio no disponible. Revisa tu conexión y recarga antes de iniciar.';return;}
+  preview.textContent='Verificando matrícula...';
+  client.from('pparcial_estudiantes').select('nombre,grupo,horario,periodo').eq('documento',doc).eq('periodo','2026-3').maybeSingle().then(function(r){
+    if(document.getElementById('docInput').value.trim()!==doc)return;
+    if(r.error){preview.textContent='No se pudo verificar la matrícula. Vuelve a intentar.';return;}
+    if(!r.data){preview.textContent='Documento no encontrado en el periodo 2026-3';return;}
+    state.nombre=r.data.nombre;state.grupo=r.data.grupo;state.horario=r.data.horario;
+    preview.textContent=r.data.nombre+' · '+r.data.grupo;button.disabled=false;
+  }).catch(function(){if(document.getElementById('docInput').value.trim()===doc)preview.textContent='No se pudo verificar la matrícula. Vuelve a intentar.';});
 });
 
 // ═══════════════════════════════════════

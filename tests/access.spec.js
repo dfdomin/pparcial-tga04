@@ -1,10 +1,12 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
+const {routePyodide}=require('./helpers');
+test.beforeEach(async({page})=>{await routePyodide(page);});
 
 test.describe('PParcial — Acceso', () => {
   test('muestra pantalla de acceso con título', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.access-card h1')).toContainText('PParcial 2026-2');
+    await expect(page.locator('.access-card h1')).toContainText('PParcial 2026-3');
     await expect(page.locator('#docInput')).toBeVisible();
   });
 
