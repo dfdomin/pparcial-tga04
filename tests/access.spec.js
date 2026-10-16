@@ -26,18 +26,18 @@ test.describe('PParcial — Acceso', () => {
   });
 });
 
-test.describe('PParcial — Mobile block', () => {
-  test('bloquea en viewport móvil pequeño', async ({ page }) => {
+test.describe('PParcial — Celular permitido', () => {
+  test('en viewport de celular se muestra la pantalla de acceso (ya no se bloquea)', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
-    // La detección usa userAgent + width. Forzamos con viewport pequeño
-    await expect(page.locator('#mobileBlock')).toBeVisible();
+    await expect(page.locator('#mobileBlock')).toHaveCount(0);
+    await expect(page.locator('#accessScreen')).toBeVisible();
+    await expect(page.locator('#docInput')).toBeVisible();
   });
 
-  test('no bloquea en viewport desktop', async ({ page }) => {
+  test('en computador se muestra la pantalla de acceso', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
-    await expect(page.locator('#mobileBlock')).not.toBeVisible();
     await expect(page.locator('#accessScreen')).toBeVisible();
   });
 });

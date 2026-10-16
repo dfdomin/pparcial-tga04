@@ -79,11 +79,23 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .feedback.ok { background: #10b98122; border: 1px solid var(--green); color: var(--green); }
 .feedback.err { background: #ef444422; border: 1px solid var(--red); color: var(--red); }
 
-/* Mobile: single column */
+/* Enunciado y salidas no seleccionables (el editor sí) */
+.exam-layout .instr-panel, .exam-layout .code-base, .exam-layout .output-panel { -webkit-user-select: none; user-select: none; }
+
+/* Celular: una columna */
 @media (max-width: 768px) {
-  .exam-layout { grid-template-columns: 1fr; grid-template-rows: 48px 200px 1fr 40px; }
-  .instr-panel { border-right: none; border-bottom: 1px solid var(--border); }
+  body { height: 100dvh; }
+  .exam-layout.active { height: 100dvh; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 34vh) 1fr auto; }
+  .topbar { padding: 6px 10px; gap: 8px; flex-wrap: wrap; min-height: 44px; }
+  .instr-panel { border-right: none; border-bottom: 1px solid var(--border); padding: 12px; }
+  .editor-panel textarea { font-size: 16px; padding: 12px; }
+  .editor-panel .code-base { font-size: 0.72rem; padding: 8px 12px; }
+  .output-panel { max-height: 22vh; }
+  .bottombar { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+  .bottombar .btn { padding: 10px 14px; }
+  .access-card { padding: 24px 16px; }
 }
+
 
 /* Bloqueo móvil */
 .mobile-block { display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 24px; }
@@ -115,15 +127,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
     <input type="text" id="docInput" placeholder="Número de documento" autocomplete="off">
     <div id="studentPreview" style="font-size:0.72rem;color:var(--blue);margin:4px 0;min-height:20px"></div>
     <button class="btn btn-primary" id="btnStart" disabled onclick="startExam()">▶ Iniciar Parcial</button>
-    <p style="font-size:0.62rem;color:#555;margin-top:12px">⏱ 50 min · 9 preguntas · Sin retroceso · Intento único (reanudable)<br>🖥 Se requiere pantalla completa · Salir resta −0.1 pts<br>🔄 7 envíos evaluables por pregunta · sin descuento por reintento<br>⚠ Errores de Python y envíos sin salida no cuentan<br>⏰ +5 min extra disponible (máx. 3, −0.5 pts c/u)</p>
-  </div>
-</div>
-
-<!-- MOBILE BLOCK -->
-<div id="mobileBlock" class="mobile-block" style="display:none">
-  <div>
-    <h2>⚠️ Dispositivo no compatible</h2>
-    <p>El parcial solo puede presentarse desde un computador (PC o portátil).<br>Si estás en un computador, maximiza la ventana del navegador.</p>
+    <p style="font-size:0.62rem;color:#555;margin-top:12px">⏱ 50 min · 9 preguntas · Sin retroceso · Intento único (reanudable)<br>🖥 Computador: pantalla completa obligatoria · 📱 Celular: permitido<br>🚫 Cambiar de app, ventana o pestaña, o salir de pantalla completa: −0.1 c/u<br>📋 Pegar texto está bloqueado y cada intento resta −0.1<br>🔄 7 envíos evaluables por pregunta · sin descuento por reintento<br>⚠ Errores de Python y envíos sin salida no cuentan<br>⏰ +5 min extra disponible (máx. 3, −0.5 pts c/u)</p>
   </div>
 </div>
 
@@ -176,6 +180,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="js/exam-persistence.js"></script>
+<script src="js/exam-integrity.js"></script>
 <script src="js/python-executor.js"></script>
 <script src="js/exam-grading.js"></script>
 <script>
@@ -725,7 +730,7 @@ Object.assign(state, {drafts:{}, outputs:{}, dirty:false, editVersion:0, serverO
 var draftTimer = null, advanceTimer = null, persistenceBusy = false;
 function captureSnapshot() {
   return JSON.parse(JSON.stringify({preguntaActual:state.preguntaActual,retryCount:state.retryCount,
-    respuestas:state.respuestas,drafts:state.drafts,outputs:state.outputs,penalSalidas:state.penalSalidas,
+    respuestas:state.respuestas,drafts:state.drafts,outputs:state.outputs,penalSalidas:state.penalSalidas,integridad:state.integridad,
     pendingForReview:state.pendingForReview}));
 }
 function restoreSnapshot(s) {
@@ -735,6 +740,8 @@ function restoreSnapshot(s) {
   state.drafts = s.drafts || {}; state.outputs = s.outputs || {};
   state.pendingForReview = s.pendingForReview || null;
   state.penalSalidas = Math.max(state.penalSalidas, Number(s.penalSalidas)||0);
+  var g = s.integridad || {}; state.integridad = state.integridad || {};
+  ['foco','pestana','pantalla','pegar','copiar'].forEach(function(k){ state.integridad[k] = Math.max(Number(state.integridad[k])||0, Number(g[k])||0); });
 }
 function recoveryCopy() {
   if (!state.documento || state.finished) return;
@@ -805,7 +812,7 @@ async function startExam() {
   if(!doc||state.starting||state.examActive)return;
   state.starting=true;document.getElementById('btnStart').disabled=true;
   // Fullscreen requires the initial user gesture. A failed browser request is not a programming error.
-  if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(function(){});
+  ExamIntegrity.enterFullscreen();
   try{
     var session=await ExamPersistence.begin(doc,state.nombre);
     state.documento=doc;state.nombre=session.nombre||state.nombre||'Estudiante';
@@ -818,6 +825,7 @@ async function startExam() {
       state.pendingExtension=null;state.pendingForReview=recovery.pendingForReview||state.pendingForReview||null;state.finishing=!!recovery.finishing;state.dirty=!!recovery.dirty;
     }
     state.examActive=true;
+    ExamIntegrity.watermark(state.nombre+' · '+doc+' · '+state.nombre+' · '+doc);
     document.getElementById('accessScreen').style.display='none';
     document.getElementById('examLayout').classList.add('active');
     document.getElementById('studentName').textContent=state.nombre;
@@ -1002,6 +1010,7 @@ async function deliverPendingForReview(){
   finally{persistenceBusy=false;}
 }
 function showCompleted(result){
+  ExamIntegrity.watermark(null);
   state.finished=true;state.examActive=false;state.finishing=false;state.pendingAnswer=null;
   clearInterval(state.timerInterval);clearTimeout(draftTimer);clearTimeout(advanceTimer);
   ExamPersistence.journal(state.documento,null);syncMessage('',false);
@@ -1027,24 +1036,18 @@ window.addEventListener('beforeunload',function(e){
 setInterval(function(){if(state.examActive&&!persistenceBusy&&(state.dirty||state.pendingAnswer||state.finishing||state.pendingExtension))retrySave();},10000);
 
 // ═══════════════════════════════════════
-// INTEGRITY
+// INTEGRIDAD (js/exam-integrity.js): salidas, foco, pegar, copiar, marca de agua
 // ═══════════════════════════════════════
-document.addEventListener('visibilitychange', function() {
-  if (document.hidden && state.examActive) {
+state.integridad = {foco:0, pestana:0, pantalla:0, pegar:0, copiar:0};
+ExamIntegrity.install({
+  isActive: function() { return state.examActive && !state.finished; },
+  penalize: function(kind, msg) {
     state.penalSalidas++;
-    showIntegrityWarning('Cambiaste de pestaña o ventana. Penalización: −0.1 pts (total: −' + (state.penalSalidas * 0.1).toFixed(1) + ')');
-  }
-});
-
-document.addEventListener('fullscreenchange', function() {
-  if (!document.fullscreenElement && state.examActive) {
-    state.penalSalidas++;
-    showIntegrityWarning('Saliste de pantalla completa. Penalización: −0.1 pts (total: −' + (state.penalSalidas * 0.1).toFixed(1) + '). Volviendo a pantalla completa...');
-    // Re-forzar fullscreen tras 1.5s
-    setTimeout(function() {
-      document.documentElement.requestFullscreen().catch(function(){});
-    }, 1500);
-  }
+    state.integridad[kind] = (state.integridad[kind]||0) + 1;
+    showIntegrityWarning(msg + ' (total: −' + (state.penalSalidas * 0.1).toFixed(1) + ')');
+    changed(); scheduleDraft();
+  },
+  log: function(kind) { state.integridad[kind] = (state.integridad[kind]||0) + 1; changed(); }
 });
 
 function showIntegrityWarning(msg) {
@@ -1052,23 +1055,13 @@ function showIntegrityWarning(msg) {
   if (!w) {
     w = document.createElement('div');
     w.id = 'integrityWarning';
-    w.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:10px 16px;font-size:0.8rem;font-weight:700;z-index:200;display:none';
+    w.setAttribute('role', 'alert');
+    w.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:10px 16px;font-size:0.8rem;font-weight:700;z-index:350;display:none';
     document.body.appendChild(w);
   }
   w.textContent = '⚠ ' + msg;
   w.style.display = 'block';
-  setTimeout(function() { w.style.display = 'none'; }, 4000);
-}
-
-// ═══════════════════════════════════════
-// MOBILE DETECTION
-// ═══════════════════════════════════════
-function checkMobile() {
-  var isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent) || window.innerWidth < 768;
-  if (isMobile) {
-    document.getElementById('accessScreen').style.display = 'none';
-    document.getElementById('mobileBlock').style.display = 'flex';
-  }
+  clearTimeout(w._t); w._t = setTimeout(function() { w.style.display = 'none'; }, 5000);
 }
 
 // ═══════════════════════════════════════
@@ -1093,7 +1086,6 @@ document.getElementById('docInput').addEventListener('input', function() {
 // ═══════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════
-checkMobile();
 
 document.getElementById('codeEditor').addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runCode(); }
